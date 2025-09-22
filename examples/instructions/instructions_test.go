@@ -1,6 +1,7 @@
 package instructions
 
 import (
+	"math"
 	"testing"
 )
 
