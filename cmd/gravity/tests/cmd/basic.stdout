@@ -243,7 +243,7 @@ func (i *BasicInstance) Hello(
 func (i *BasicInstance) Primitive(
 	ctx context.Context,
 ) bool {
-	raw0, err0 := i.module.ExportedFunction("primitive").Call(ctx, )
+	_, err0 := i.module.ExportedFunction("primitive").Call(ctx, )
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err0 != nil {
 		panic(err0)
@@ -257,7 +257,7 @@ func (i *BasicInstance) Primitive(
 func (i *BasicInstance) OptionalPrimitive(
 	ctx context.Context,
 ) (bool, bool) {
-	raw0, err0 := i.module.ExportedFunction("optional-primitive").Call(ctx, )
+	_, err0 := i.module.ExportedFunction("optional-primitive").Call(ctx, )
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err0 != nil {
 		panic(err0)
