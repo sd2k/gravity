@@ -1394,7 +1394,16 @@ impl Bindgen for Func {
             Instruction::I32FromU16 => todo!("implement instruction: {inst:?}"),
             Instruction::I32FromS16 => todo!("implement instruction: {inst:?}"),
             Instruction::I32FromU8 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS8 => todo!("implement instruction: {inst:?}"),
+            Instruction::I32FromS8 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := int32($operand)
+                }
+                results.push(Operand::SingleValue(value))
+            }
             Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
             Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
             Instruction::S8FromI32 => todo!("implement instruction: {inst:?}"),

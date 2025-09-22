@@ -138,6 +138,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-instructions"
+version = "0.0.2"
+dependencies = [
+ "wit-bindgen",
+ "wit-component",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
