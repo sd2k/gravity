@@ -201,8 +201,9 @@ impl Bindgen for Func<'_> {
                         }
                         GoResult::Anon(_) => {
                             $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if $err != nil {
-                                return $err
+                                panic($err)
                             }
                         }
                         GoResult::Empty => {
