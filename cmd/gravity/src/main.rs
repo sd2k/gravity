@@ -499,20 +499,22 @@ impl Bindgen for Func {
                 // at the types and converting with proper guards in place
                 quote_in! { self.body =>
                     $['\r']
-                    $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             if $err != nil {
                                 var $default $(typ.as_ref())
                                 return $default, $err
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
+                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             if $err != nil {
                                 return $err
                             }
                         }
                         GoResult::Anon(_) | GoResult::Empty => {
+                            _, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if $err != nil {
                                 panic($err)
@@ -538,7 +540,10 @@ impl Bindgen for Func {
                         }()
                     })
 
-                    $ret := $raw[0]
+                    $(match &self.result {
+                        GoResult::Anon(_) => $ret := $raw[0],
+                        GoResult::Empty => (),
+                    })
                 };
                 match self.result {
                     GoResult::Empty => (),
