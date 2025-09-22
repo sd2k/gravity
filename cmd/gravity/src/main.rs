@@ -540,7 +540,10 @@ impl Bindgen for Func {
 
                     $ret := $raw[0]
                 };
-                results.push(Operand::SingleValue(ret.into()));
+                match self.result {
+                    GoResult::Empty => (),
+                    GoResult::Anon(_) => results.push(Operand::SingleValue(ret.into())),
+                }
             }
             Instruction::I32Load8U { offset } => {
                 // TODO(#58): Support additional ArchitectureSize
