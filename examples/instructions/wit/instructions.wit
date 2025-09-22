@@ -2,4 +2,5 @@ package gravity:instructions;
 
 world instructions {
   export i32-from-s8: func(val: s8);
+  export s8-from-i32: func() -> s8;
 }
