@@ -1,0 +1,5 @@
+package gravity:instructions;
+
+world instructions {
+  export i32-from-s8: func(val: s8);
+}
