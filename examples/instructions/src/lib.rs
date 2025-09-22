@@ -10,4 +10,7 @@ impl Guest for InstructionsWorld {
     fn i32_from_s8(val: i8) {
         assert!((i8::MIN..=i8::MAX).contains(&val));
     }
+    fn s8_from_i32() -> i8 {
+        Default::default()
+    }
 }
