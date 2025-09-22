@@ -103,6 +103,11 @@ impl Bindgen for Func {
         let iter_element = "e";
         let iter_base = "base";
 
+        let wazero_api_decode_i32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeI32");
+        let wazero_api_encode_i32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeI32");
+        let wazero_api_decode_u32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeU32");
+        let wazero_api_encode_u32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeU32");
+
         // println!("instruction: {inst:?}, operands: {operands:?}");
 
         match inst {
@@ -283,9 +288,14 @@ impl Bindgen for Func {
                 results.push(Operand::SingleValue(value))
             }
             Instruction::I32FromU32 => {
-                // It seems like this isn't needed because Wazero works with Go's uint32 type
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
                 let operand = &operands[0];
-                results.push(operand.clone());
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_encode_u32($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
             }
             Instruction::U32FromI32 => {
                 let tmp = self.tmp();
@@ -293,7 +303,7 @@ impl Bindgen for Func {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint32($operand)
+                    $result := $wazero_api_decode_u32($operand)
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1070,18 +1080,82 @@ impl Bindgen for Func {
             Instruction::I32FromChar => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromU64 => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromS64 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS32 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromU16 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS16 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromU8 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS8 => todo!("implement instruction: {inst:?}"),
+            Instruction::I32FromS32 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $wazero_api_encode_i32($operand)
+                }
+                results.push(Operand::SingleValue(value))
+            }
+            // All of these values should fit in Go's `int32` type which allows a safe cast
+            Instruction::I32FromU16
+            | Instruction::I32FromS16
+            | Instruction::I32FromU8
+            | Instruction::I32FromS8 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $wazero_api_encode_i32(int32($operand))
+                }
+                results.push(Operand::SingleValue(value))
+            }
             Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
             Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
-            Instruction::S8FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::U8FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::S16FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::U16FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::S32FromI32 => todo!("implement instruction: {inst:?}"),
+            Instruction::S8FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := int8($wazero_api_decode_i32($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::U8FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := uint8($wazero_api_decode_u32($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::S16FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := int16($wazero_api_decode_i32($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::U16FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := uint16($wazero_api_decode_u32($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::S32FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_decode_i32($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
