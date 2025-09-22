@@ -5,7 +5,7 @@ import (
 )
 
 func TestI32FromS8(t *testing.T) {
-	fac, err := NewBasicFactory(t.Context())
+	fac, err := NewInstructionsFactory(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
