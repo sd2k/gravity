@@ -513,7 +513,13 @@ impl Bindgen for Func {
                                 return $err
                             }
                         }
-                        GoResult::Anon(_) | GoResult::Empty => {
+                        GoResult::Anon(_) => {
+                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            if $err != nil {
+                                return $err
+                            }
+                        }
+                        GoResult::Empty => {
                             _, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if $err != nil {
