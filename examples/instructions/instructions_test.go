@@ -43,3 +43,42 @@ func TestS8FromI32(t *testing.T) {
 		t.Errorf("expected: %d, but got: %d", expected, actual)
 	}
 }
+
+func TestI32FromU8(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	for x := math.MinUint8; x <= math.MaxUint8; x++ {
+		ins.I32FromU8(t.Context(), uint8(x))
+	}
+}
+
+func TestU8FromI32(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	actual := ins.U8FromI32(t.Context())
+
+	const expected = 0
+	if actual != expected {
+		t.Errorf("expected: %d, but got: %d", expected, actual)
+	}
+}
