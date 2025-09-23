@@ -6,4 +6,10 @@ world instructions {
 
   export i32-from-u8: func(val: u8);
   export u8-from-i32: func() -> u8;
+
+  export i32-from-s16: func(val: s16);
+  export s16-from-i32: func() -> s16;
+
+  export i32-from-u16: func(val: u16);
+  export u16-from-i32: func() -> u16;
 }

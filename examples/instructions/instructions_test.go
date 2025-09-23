@@ -82,3 +82,81 @@ func TestU8FromI32(t *testing.T) {
 		t.Errorf("expected: %d, but got: %d", expected, actual)
 	}
 }
+
+func TestI32FromS16(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	for x := math.MinInt16; x <= math.MaxInt16; x++ {
+		ins.I32FromS16(t.Context(), int16(x))
+	}
+}
+
+func TestS16FromI32(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	actual := ins.S16FromI32(t.Context())
+
+	const expected = 0
+	if actual != expected {
+		t.Errorf("expected: %d, but got: %d", expected, actual)
+	}
+}
+
+func TestI32FromU16(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	for x := 0; x <= math.MaxUint16; x++ {
+		ins.I32FromU16(t.Context(), uint16(x))
+	}
+}
+
+func TestU16FromI32(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	actual := ins.U16FromI32(t.Context())
+
+	const expected = 0
+	if actual != expected {
+		t.Errorf("expected: %d, but got: %d", expected, actual)
+	}
+}

@@ -1087,19 +1087,11 @@ impl Bindgen for Func<'_> {
             Instruction::I64FromU64 => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromS64 => todo!("implement instruction: {inst:?}"),
             Instruction::I32FromS32 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromU16 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS16 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromU8 => {
-                let tmp = self.tmp();
-                let value = format!("value{tmp}");
-                let operand = &operands[0];
-                quote_in! { self.body =>
-                    $['\r']
-                    $(&value) := int32($operand)
-                }
-                results.push(Operand::SingleValue(value))
-            }
-            Instruction::I32FromS8 => {
+            // All of these values should fit in Go's `int32` type which allows a safe cast
+            Instruction::I32FromU16
+            | Instruction::I32FromS16
+            | Instruction::I32FromU8
+            | Instruction::I32FromS8 => {
                 let tmp = self.tmp();
                 let value = format!("value{tmp}");
                 let operand = &operands[0];
@@ -1131,8 +1123,26 @@ impl Bindgen for Func<'_> {
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
-            Instruction::S16FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::U16FromI32 => todo!("implement instruction: {inst:?}"),
+            Instruction::S16FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := int16($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::U16FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := uint16($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::S32FromI32 => todo!("implement instruction: {inst:?}"),
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
