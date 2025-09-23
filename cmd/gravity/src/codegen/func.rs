@@ -1178,8 +1178,8 @@ impl Bindgen for Func<'_> {
             Instruction::FutureLift { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::StreamLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::StreamLift { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::ErrorContextLower { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::ErrorContextLift { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::ErrorContextLower => todo!("implement instruction: {inst:?}"),
+            Instruction::ErrorContextLift => todo!("implement instruction: {inst:?}"),
             Instruction::AsyncTaskReturn { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::DropHandle { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::Flush { amt } => {
