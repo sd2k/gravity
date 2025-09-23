@@ -1103,6 +1103,7 @@ impl Bindgen for Func<'_> {
             }
             Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
             Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
+            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::S8FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
@@ -1113,6 +1114,7 @@ impl Bindgen for Func<'_> {
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
+            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::U8FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
@@ -1123,6 +1125,7 @@ impl Bindgen for Func<'_> {
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
+            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::S16FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
@@ -1133,6 +1136,7 @@ impl Bindgen for Func<'_> {
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
+            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::U16FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
