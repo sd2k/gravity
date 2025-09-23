@@ -57,7 +57,7 @@ func TestI32FromU8(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for x := math.MinUint8; x <= math.MaxUint8; x++ {
+	for x := 0; x <= math.MaxUint8; x++ {
 		ins.I32FromU8(t.Context(), uint8(x))
 	}
 }
