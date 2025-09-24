@@ -1,15 +1,11 @@
 package gravity:instructions;
 
 world instructions {
-  export i32-from-s8: func(val: s8);
-  export s8-from-i32: func() -> s8;
+  export s8-roundtrip: func(val: s8) -> s8;
 
-  export i32-from-u8: func(val: u8);
-  export u8-from-i32: func() -> u8;
+  export u8-roundtrip: func(val: u8) -> u8;
 
-  export i32-from-s16: func(val: s16);
-  export s16-from-i32: func() -> s16;
+  export s16-roundtrip: func(val: s16) -> s16;
 
-  export i32-from-u16: func(val: u16);
-  export u16-from-i32: func() -> u16;
+  export u16-roundtrip: func(val: u16) -> u16;
 }
