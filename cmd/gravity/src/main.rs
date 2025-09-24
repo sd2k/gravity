@@ -421,6 +421,10 @@ impl Bindgen for Func {
         let iter_element = "e";
         let iter_base = "base";
 
+        let wazero_api_decode_i32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeI32");
+        let wazero_api_encode_i32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeI32");
+        let wazero_api_decode_u32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeU32");
+
         // println!("instruction: {inst:?}, operands: {operands:?}");
 
         match inst {
@@ -1416,53 +1420,49 @@ impl Bindgen for Func {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $(&value) := int32($operand)
+                    $(&value) := $wazero_api_encode_i32(int32($operand))
                 }
                 results.push(Operand::SingleValue(value))
             }
             Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
             Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
-            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::S8FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := int8($operand)
+                    $result := int8($wazero_api_decode_i32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
-            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::U8FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint8($operand)
+                    $result := uint8($wazero_api_decode_u32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
-            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::S16FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := int16($operand)
+                    $result := int16($wazero_api_decode_i32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
-            // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::U16FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint16($operand)
+                    $result := uint16($wazero_api_decode_u32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
