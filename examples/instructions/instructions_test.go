@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestI32FromS8(t *testing.T) {
+func Test_S8Roundtrip(t *testing.T) {
 	fac, err := NewInstructionsFactory(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -18,12 +18,15 @@ func TestI32FromS8(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for x := math.MinInt8; x <= math.MaxInt8; x++ {
-		ins.I32FromS8(t.Context(), int8(x))
+	for expected := math.MinInt8; expected <= math.MaxInt8; expected++ {
+		actual := ins.S8Roundtrip(t.Context(), int8(expected))
+		if actual != expected {
+			t.Errorf("expected: %d, but got: %d", expected, actual)
+		}
 	}
 }
 
-func TestS8FromI32(t *testing.T) {
+func Test_U8Roundtrip(t *testing.T) {
 	fac, err := NewInstructionsFactory(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -36,15 +39,15 @@ func TestS8FromI32(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	actual := ins.S8FromI32(t.Context())
-
-	const expected = 0
-	if actual != expected {
-		t.Errorf("expected: %d, but got: %d", expected, actual)
+	for expected := 0; expected <= math.MaxUint8; expected++ {
+		actual := ins.TestU8Roundtrip(t.Context(), uint8(expected))
+		if actual != expected {
+			t.Errorf("expected: %d, but got: %d", expected, actual)
+		}
 	}
 }
 
-func TestI32FromU8(t *testing.T) {
+func Test_S16Roundtrip(t *testing.T) {
 	fac, err := NewInstructionsFactory(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -57,12 +60,15 @@ func TestI32FromU8(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for x := 0; x <= math.MaxUint8; x++ {
-		ins.I32FromU8(t.Context(), uint8(x))
+	for expected := math.MinInt16; expected <= math.MaxInt16; expected++ {
+		actual := ins.S16Roundtrip(t.Context(), int16(expected))
+		if actual != expected {
+			t.Errorf("expected: %d, but got: %d", expected, actual)
+		}
 	}
 }
 
-func TestU8FromI32(t *testing.T) {
+func Test_U16Roundtrip(t *testing.T) {
 	fac, err := NewInstructionsFactory(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -75,88 +81,10 @@ func TestU8FromI32(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	actual := ins.U8FromI32(t.Context())
-
-	const expected = 0
-	if actual != expected {
-		t.Errorf("expected: %d, but got: %d", expected, actual)
-	}
-}
-
-func TestI32FromS16(t *testing.T) {
-	fac, err := NewInstructionsFactory(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fac.Close(t.Context())
-
-	ins, err := fac.Instantiate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ins.Close(t.Context())
-
-	for x := math.MinInt16; x <= math.MaxInt16; x++ {
-		ins.I32FromS16(t.Context(), int16(x))
-	}
-}
-
-func TestS16FromI32(t *testing.T) {
-	fac, err := NewInstructionsFactory(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fac.Close(t.Context())
-
-	ins, err := fac.Instantiate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ins.Close(t.Context())
-
-	actual := ins.S16FromI32(t.Context())
-
-	const expected = 0
-	if actual != expected {
-		t.Errorf("expected: %d, but got: %d", expected, actual)
-	}
-}
-
-func TestI32FromU16(t *testing.T) {
-	fac, err := NewInstructionsFactory(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fac.Close(t.Context())
-
-	ins, err := fac.Instantiate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ins.Close(t.Context())
-
-	for x := 0; x <= math.MaxUint16; x++ {
-		ins.I32FromU16(t.Context(), uint16(x))
-	}
-}
-
-func TestU16FromI32(t *testing.T) {
-	fac, err := NewInstructionsFactory(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fac.Close(t.Context())
-
-	ins, err := fac.Instantiate(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ins.Close(t.Context())
-
-	actual := ins.U16FromI32(t.Context())
-
-	const expected = 0
-	if actual != expected {
-		t.Errorf("expected: %d, but got: %d", expected, actual)
+	for expected := 0; expected <= math.MaxUint16; expected++ {
+		actual := ins.U16Roundtrip(t.Context(), uint16(expected))
+		if actual != expected {
+			t.Errorf("expected: %d, but got: %d", expected, actual)
+		}
 	}
 }
