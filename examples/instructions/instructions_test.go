@@ -42,7 +42,7 @@ func Test_U8Roundtrip(t *testing.T) {
 
 	var expected uint8
 	for expected = 0; expected <= math.MaxUint8; expected++ {
-		actual := ins.TestU8Roundtrip(t.Context(), expected)
+		actual := ins.U8Roundtrip(t.Context(), expected)
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
 		}
