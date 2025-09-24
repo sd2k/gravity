@@ -432,7 +432,7 @@ impl<'a> ImportCodeGenerator<'a> {
         } else {
             todo!("implement handling of wasm signatures with results");
         };
-        let mut f = Func::import(param_name, result, self.sizes);
+        let mut f = Func::import(param_name, result, self.sizes, self.go_imports);
 
         // Magic
         wit_bindgen_core::abi::call(

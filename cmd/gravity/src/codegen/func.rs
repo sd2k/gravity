@@ -7,7 +7,7 @@ use wit_bindgen_core::{
 };
 
 use crate::{
-    go::{GoIdentifier, GoResult, GoType, Operand, comment},
+    go::{GoIdentifier, GoImports, GoResult, GoType, Operand, comment},
     resolve_type, resolve_wasm_type,
 };
 
@@ -36,12 +36,13 @@ pub struct Func<'a> {
     block_storage: Vec<Tokens<Go>>,
     blocks: Vec<(Tokens<Go>, Vec<Operand>)>,
     sizes: &'a SizeAlign,
+    go_imports: &'a GoImports,
 }
 
 impl<'a> Func<'a> {
     /// Create a new exported function.
     #[allow(dead_code, reason = "halfway through refactor of func bindings")]
-    pub fn export(result: GoResult, sizes: &'a SizeAlign) -> Self {
+    pub fn export(result: GoResult, sizes: &'a SizeAlign, go_imports: &'a GoImports) -> Self {
         Self {
             direction: Direction::Export,
             args: Vec::new(),
@@ -51,11 +52,17 @@ impl<'a> Func<'a> {
             block_storage: Vec::new(),
             blocks: Vec::new(),
             sizes,
+            go_imports,
         }
     }
 
     /// Create a new exported function.
-    pub fn import(param_name: &'a GoIdentifier, result: GoResult, sizes: &'a SizeAlign) -> Self {
+    pub fn import(
+        param_name: &'a GoIdentifier,
+        result: GoResult,
+        sizes: &'a SizeAlign,
+        go_imports: &'a GoImports,
+    ) -> Self {
         Self {
             direction: Direction::Import { param_name },
             args: Vec::new(),
@@ -65,6 +72,7 @@ impl<'a> Func<'a> {
             block_storage: Vec::new(),
             blocks: Vec::new(),
             sizes,
+            go_imports,
         }
     }
 
@@ -1097,7 +1105,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $(&value) := int32($operand)
+                    $(&value) := $(&self.go_imports.wazero_api_encode_i32)(int32($operand))
                 }
                 results.push(Operand::SingleValue(value))
             }
@@ -1110,7 +1118,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := int8($operand)
+                    $result := int8($(&self.go_imports.wazero_api_decode_i32)($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1121,7 +1129,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint8($operand)
+                    $result := uint8($(&self.go_imports.wazero_api_decode_u32)($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1132,7 +1140,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := int16($operand)
+                    $result := int16($(&self.go_imports.wazero_api_decode_i32)($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1143,7 +1151,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint16($operand)
+                    $result := uint16($(&self.go_imports.wazero_api_decode_u32)($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }

@@ -11,6 +11,9 @@ pub struct GoImports {
     pub wazero_compiled_module: Import,
     pub wazero_api_module: Import,
     pub wazero_api_memory: Import,
+    pub wazero_api_decode_i32: Import,
+    pub wazero_api_encode_i32: Import,
+    pub wazero_api_decode_u32: Import,
 }
 
 impl Default for GoImports {
@@ -45,6 +48,18 @@ impl GoImports {
             wazero_api_memory: genco::lang::go::import(
                 "github.com/tetratelabs/wazero/api",
                 "Memory",
+            ),
+            wazero_api_decode_i32: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "DecodeI32",
+            ),
+            wazero_api_encode_i32: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "EncodeI32",
+            ),
+            wazero_api_decode_u32: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "DecodeU32",
             ),
         }
     }
