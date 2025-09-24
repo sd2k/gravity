@@ -50,7 +50,7 @@ impl<'a> ExportGenerator<'a> {
             GoResult::Empty
         };
 
-        let mut f = crate::Func::export(result, self.config.sizes);
+        let mut f = crate::Func::export(result, self.config.sizes, self.config.go_imports);
         wit_bindgen_core::abi::call(
             self.config.resolve,
             wit_bindgen_core::abi::AbiVariant::GuestExport,
