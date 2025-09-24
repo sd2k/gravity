@@ -18,8 +18,9 @@ func Test_S8Roundtrip(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for expected := math.MinInt8; expected <= math.MaxInt8; expected++ {
-		actual := ins.S8Roundtrip(t.Context(), int8(expected))
+	var expected int8
+	for expected = math.MinInt8; expected <= math.MaxInt8; expected++ {
+		actual := ins.S8Roundtrip(t.Context(), expected)
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
 		}
@@ -39,8 +40,9 @@ func Test_U8Roundtrip(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for expected := 0; expected <= math.MaxUint8; expected++ {
-		actual := ins.TestU8Roundtrip(t.Context(), uint8(expected))
+	var expected uint8
+	for expected = 0; expected <= math.MaxUint8; expected++ {
+		actual := ins.TestU8Roundtrip(t.Context(), expected)
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
 		}
@@ -60,8 +62,9 @@ func Test_S16Roundtrip(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for expected := math.MinInt16; expected <= math.MaxInt16; expected++ {
-		actual := ins.S16Roundtrip(t.Context(), int16(expected))
+	var expected int16
+	for expected = math.MinInt16; expected <= math.MaxInt16; expected++ {
+		actual := ins.S16Roundtrip(t.Context(), expected)
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
 		}
@@ -81,8 +84,9 @@ func Test_U16Roundtrip(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for expected := 0; expected <= math.MaxUint16; expected++ {
-		actual := ins.U16Roundtrip(t.Context(), uint16(expected))
+	var expected uint16
+	for expected = 0; expected <= math.MaxUint16; expected++ {
+		actual := ins.U16Roundtrip(t.Context(), expected)
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
 		}
