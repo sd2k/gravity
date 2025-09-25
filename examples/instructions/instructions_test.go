@@ -96,7 +96,7 @@ func Test_S16Roundtrip(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	for expected := range inclusive[int16](math.MaxInt16, math.MaxInt16) {
+	for expected := range inclusive[int16](math.MinInt16, math.MaxInt16) {
 		actual := ins.S16Roundtrip(t.Context(), expected)
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
