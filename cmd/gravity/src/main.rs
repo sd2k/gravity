@@ -1409,7 +1409,16 @@ impl Bindgen for Func {
             Instruction::I32FromChar => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromU64 => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromS64 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS32 => todo!("implement instruction: {inst:?}"),
+            Instruction::I32FromS32 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $wazero_api_encode_i32($operand)
+                }
+                results.push(Operand::SingleValue(value))
+            }
             // All of these values should fit in Go's `int32` type which allows a safe cast
             Instruction::I32FromU16
             | Instruction::I32FromS16
@@ -1466,7 +1475,16 @@ impl Bindgen for Func {
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
-            Instruction::S32FromI32 => todo!("implement instruction: {inst:?}"),
+            Instruction::S32FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_decode_i32($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
