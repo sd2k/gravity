@@ -161,13 +161,15 @@ mod tests {
 
         // Verify function body
         assert!(generated.contains("arg0 := value"));
+        assert!(generated.contains("result0 := api.EncodeU32(arg0)"));
         assert!(
-            generated.contains("i.module.ExportedFunction(\"add_number\").Call(ctx, uint64(arg0))")
+            generated
+                .contains("i.module.ExportedFunction(\"add_number\").Call(ctx, uint64(result0))")
         );
-        assert!(generated.contains("if err0 != nil {"));
-        assert!(generated.contains("panic(err0)"));
-        assert!(generated.contains("results0 := raw0[0]"));
-        assert!(generated.contains("result1 := uint32(results0)"));
-        assert!(generated.contains("return result1"));
+        assert!(generated.contains("if err1 != nil {"));
+        assert!(generated.contains("panic(err1)"));
+        assert!(generated.contains("results1 := raw1[0]"));
+        assert!(generated.contains("result2 := api.DecodeU32(results1)"));
+        assert!(generated.contains("return result2"));
     }
 }
