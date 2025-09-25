@@ -23,4 +23,12 @@ impl Guest for InstructionsWorld {
         assert!((u16::MIN..=u16::MAX).contains(&val));
         val
     }
+    fn s32_roundtrip(val: i32) -> i32 {
+        assert!((i32::MIN..=i32::MAX).contains(&val));
+        val
+    }
+    fn u32_roundtrip(val: u32) -> u32 {
+        assert!((u32::MIN..=u32::MAX).contains(&val));
+        val
+    }
 }
