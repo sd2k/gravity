@@ -424,6 +424,7 @@ impl Bindgen for Func {
         let wazero_api_decode_i32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeI32");
         let wazero_api_encode_i32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeI32");
         let wazero_api_decode_u32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeU32");
+        let wazero_api_encode_u32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeU32");
 
         // println!("instruction: {inst:?}, operands: {operands:?}");
 
@@ -620,9 +621,14 @@ impl Bindgen for Func {
                 results.push(Operand::SingleValue(value))
             }
             Instruction::I32FromU32 => {
-                // It seems like this isn't needed because Wazero works with Go's uint32 type
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
                 let operand = &operands[0];
-                results.push(operand.clone());
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_encode_u32($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
             }
             Instruction::U32FromI32 => {
                 let tmp = self.tmp();
@@ -630,7 +636,7 @@ impl Bindgen for Func {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint32($operand)
+                    $result := $wazero_api_decode_u32($operand)
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
