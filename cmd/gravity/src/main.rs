@@ -425,6 +425,10 @@ impl Bindgen for Func {
         let wazero_api_encode_i32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeI32");
         let wazero_api_decode_u32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeU32");
         let wazero_api_encode_u32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeU32");
+        let wazero_api_decode_f32 = &go::import("github.com/tetratelabs/wazero/api", "DecodeF32");
+        let wazero_api_encode_f32 = &go::import("github.com/tetratelabs/wazero/api", "EncodeF32");
+        let wazero_api_decode_f64 = &go::import("github.com/tetratelabs/wazero/api", "DecodeF64");
+        let wazero_api_encode_f64 = &go::import("github.com/tetratelabs/wazero/api", "EncodeF64");
 
         // println!("instruction: {inst:?}, operands: {operands:?}");
 
@@ -1439,8 +1443,26 @@ impl Bindgen for Func {
                 }
                 results.push(Operand::SingleValue(value))
             }
-            Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
-            Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
+            Instruction::CoreF32FromF32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_encode_f32($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::CoreF64FromF64 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_encode_f64($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::S8FromI32 => {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
@@ -1494,8 +1516,26 @@ impl Bindgen for Func {
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::F32FromCoreF32 => todo!("implement instruction: {inst:?}"),
-            Instruction::F64FromCoreF64 => todo!("implement instruction: {inst:?}"),
+            Instruction::F32FromCoreF32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_decode_f32($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::F64FromCoreF64 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $wazero_api_decode_f64($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::TupleLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::TupleLift { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::FlagsLower { .. } => todo!("implement instruction: {inst:?}"),
