@@ -37,23 +37,23 @@ ABI][canonical-abi].
 ## Installation
 
 To produce Go files with good indentation, this tool should be installed with a
-Rust nightly toolchain. You can install one with:
+Rust toolchain at least as recent as 1.88.0. For example:
 
 ```bash
-rustup toolchain install nightly-2025-01-01
+rustup toolchain install stable
 ```
 
 From inside this directory, you can install using the command:
 
 ```bash
-cargo +nightly-2025-01-01 install --path cmd/gravity
+cargo install --path cmd/gravity
 ```
 
 Or alternatively, you can install the latest published version from crates.io
 using this command:
 
 ```bash
-cargo +nightly-2025-01-01 install arcjet-gravity
+cargo install arcjet-gravity
 ```
 
 ## Usage
