@@ -115,7 +115,16 @@ pub enum TypeDefinition {
     Record { fields: Vec<(GoIdentifier, GoType)> },
     /// A union-like type with multiple cases, each optionally carrying data
     Variant {
-        cases: Vec<(String, Option<GoType>)>,
+        /// The Go identifier to use for the interface function.
+        ///
+        /// E.g. the `isFoo` in `type Foo interface { isFoo() }`
+        interface_function_name: GoIdentifier,
+
+        /// The cases of the variant type.
+        ///
+        /// The first element of each tuple is the prefixed name of the case,
+        /// where the prefix is the interface name.
+        cases: Vec<(GoIdentifier, Option<GoType>)>,
     },
     /// A simple enumeration with named constants
     Enum { cases: Vec<String> },
