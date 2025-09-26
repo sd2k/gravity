@@ -15,6 +15,10 @@ pub struct GoImports {
     pub wazero_api_decode_u32: Import,
     pub wazero_api_encode_i32: Import,
     pub wazero_api_decode_i32: Import,
+    pub wazero_api_decode_f32: Import,
+    pub wazero_api_encode_f32: Import,
+    pub wazero_api_decode_f64: Import,
+    pub wazero_api_encode_f64: Import,
 }
 
 impl Default for GoImports {
@@ -65,6 +69,22 @@ impl GoImports {
             wazero_api_decode_i32: genco::lang::go::import(
                 "github.com/tetratelabs/wazero/api",
                 "DecodeI32",
+            ),
+            wazero_api_decode_f32: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "DecodeF32",
+            ),
+            wazero_api_encode_f32: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "EncodeF32",
+            ),
+            wazero_api_decode_f64: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "DecodeF64",
+            ),
+            wazero_api_encode_f64: genco::lang::go::import(
+                "github.com/tetratelabs/wazero/api",
+                "EncodeF64",
             ),
         }
     }
