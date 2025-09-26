@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-genco = "0.17"
-anyhow = "1.0"
-heck = "0.5"
+genco = { workspace = true }
+anyhow = { workspace = true }
+heck = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

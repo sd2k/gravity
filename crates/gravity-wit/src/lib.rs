@@ -11,6 +11,7 @@ pub fn size_of_type(resolve: &Resolve, ty: &Type) -> usize {
         Type::U32 | Type::S32 | Type::F32 => 4,
         Type::U64 | Type::S64 | Type::F64 => 8,
         Type::String => std::mem::size_of::<(*const u8, usize)>(),
+        Type::ErrorContext => std::mem::size_of::<(*const u8, usize)>(), // Similar to string
         Type::Id(id) => {
             // Look up the type definition and calculate its size
             // This is a placeholder - proper implementation needed
@@ -27,6 +28,7 @@ pub fn align_of_type(resolve: &Resolve, ty: &Type) -> usize {
         Type::U32 | Type::S32 | Type::F32 => 4,
         Type::U64 | Type::S64 | Type::F64 => 8,
         Type::String => std::mem::align_of::<(*const u8, usize)>(),
+        Type::ErrorContext => std::mem::align_of::<(*const u8, usize)>(), // Similar to string
         Type::Id(id) => {
             // Look up the type definition and calculate its alignment
             // This is a placeholder - proper implementation needed

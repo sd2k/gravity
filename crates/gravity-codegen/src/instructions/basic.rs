@@ -162,12 +162,18 @@ impl InstructionHandler for BasicInstructionHandler {
             Instruction::I32Load8U { offset } => {
                 let operands = context.pop_operands(1);
                 let tmp = context.tmp();
-                let var = format!("load8u{}", tmp);
+                let value = format!("value{}", tmp);
+                let ok = format!("ok{}", tmp);
+                let offset_val = offset.size_wasm32();
                 quote_in! { context.body =>
                     $['\r']
-                    $(&var) := int32(uint8(*(*uint8)(unsafe.Pointer(uintptr($(&operands[0]) + $(*offset))))))
+                    $(&value), $(&ok) := i.module.Memory().ReadByte(uint32($(&operands[0]) + $(offset_val)))
+                    if !$(&ok) {
+                        // TODO: Handle error based on return type
+                        panic("failed to read byte from memory")
+                    }
                 }
-                context.push_operand(gravity_go::Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(value));
             }
             Instruction::CallWasm { name, .. } => {
                 // Handle function calls

@@ -1,6 +1,15 @@
 [workspace]
-resolver = "3"
+resolver = "2"
 members = ["cmd/*", "crates/*", "examples/*"]
+
+[workspace.dependencies]
+# Core dependencies with consistent versions
+wit-bindgen-core = "=0.42.1"
+wit-component = "=0.230.0"
+genco = "=0.17.10"
+anyhow = "1.0"
+heck = "0.5"
+clap = { version = "=4.5.47", features = ["derive"] }
 
 [patch.crates-io]
 # rand 0.9 merged into main, waiting for a new release.

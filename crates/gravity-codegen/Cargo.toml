@@ -6,12 +6,11 @@ edition = "2021"
 [dependencies]
 gravity-go = { path = "../gravity-go" }
 gravity-wit = { path = "../gravity-wit" }
-genco = "0.17"
-wit-bindgen-core = "0.36"
-wit-parser = "0.220"
-wit-component = "0.220"
-anyhow = "1.0"
-heck = "0.5"
+genco = { workspace = true }
+wit-bindgen-core = { workspace = true }
+wit-component = { workspace = true }
+anyhow = { workspace = true }
+heck = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use genco::prelude::*;
 use gravity_go::{quote, Go, Tokens};
-use wit_parser::{Function, TypeDef};
+use wit_bindgen_core::wit_parser::{Function, TypeDef};
 
 pub struct BindingsGenerator {
     output: Tokens<Go>,

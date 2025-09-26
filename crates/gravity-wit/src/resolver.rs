@@ -21,6 +21,7 @@ pub fn type_name(resolve: &Resolve, ty: &Type) -> String {
         Type::F32 => "float32".to_string(),
         Type::F64 => "float64".to_string(),
         Type::String => "string".to_string(),
+        Type::ErrorContext => "error".to_string(),
         Type::Id(id) => {
             if let Some(type_def) = resolve_type(resolve, *id) {
                 type_def
