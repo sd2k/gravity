@@ -1,7 +1,7 @@
 package examples
 
 //go:generate cargo build -p example-basic --target wasm32-unknown-unknown --release
-//go:generate cargo build -p example-record --target wasm32-unknown-unknown --release
+//go:generate cargo build -p example-records --target wasm32-unknown-unknown --release
 //go:generate cargo build -p example-iface-method-returns-string --target wasm32-unknown-unknown --release
 //go:generate cargo build -p example-instructions --target wasm32-unknown-unknown --release
 

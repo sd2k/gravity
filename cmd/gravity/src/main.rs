@@ -80,7 +80,7 @@ enum GoType {
     String,
     Error,
     Interface,
-    // Pointer(Box<GoType>),
+    Pointer(Box<GoType>),
     ValueOrOk(Box<GoType>),
     ValueOrError(Box<GoType>),
     Slice(Box<GoType>),
@@ -157,6 +157,9 @@ impl GoType {
 
             // Nothing represents no value, so no cleanup needed
             GoType::Nothing => false,
+
+            // A pointer probably needs cleanup, not sure?
+            GoType::Pointer(_) => true,
         }
     }
 }
@@ -197,10 +200,10 @@ impl FormatInto<Go> for &GoType {
             // GoType::MultiReturn(typs) => {
             //     tokens.append(quote!($(for typ in typs join (, ) => $typ)))
             // }
-            // GoType::Pointer(typ) => {
-            //     tokens.append(static_literal("*"));
-            //     typ.as_ref().format_into(tokens);
-            // }
+            GoType::Pointer(typ) => {
+                tokens.append(static_literal("*"));
+                typ.as_ref().format_into(tokens);
+            }
             GoType::UserDefined(name) => {
                 let id = GoIdentifier::Public { name };
                 id.format_into(tokens)
@@ -1111,25 +1114,22 @@ impl Bindgen for Func {
 
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
-                let ok = &format!("ok{tmp}");
                 let typ = resolve_type(payload, resolve);
                 let op = &operands[0];
 
                 quote_in! { self.body =>
                     $['\r']
-                    var $result $typ
-                    var $ok bool
+                    var $result *$typ
                     if $op == 0 {
                         $none
-                        $ok = false
+                        $result = nil
                     } else {
                         $some
-                        $ok = true
-                        $result = $some_result
+                        $result = &$some_result
                     }
                 };
 
-                results.push(Operand::MultiValue((result.into(), ok.into())));
+                results.push(Operand::SingleValue(result.into()));
             }
             Instruction::OptionLower {
                 payload: Type::String,
@@ -1327,9 +1327,10 @@ impl Bindgen for Func {
                 let value = &operands[0];
                 let default = &format!("default{tmp}");
 
-                for (i, typ) in result_types.iter().enumerate() {
+                for (i, _typ) in result_types.iter().enumerate() {
                     let variant_item = &format!("variant{tmp}_{i}");
-                    let typ = resolve_wasm_type(typ);
+                    // TODO: Use uint64 for all variant variables since they hold encoded WebAssembly values
+                    let typ = GoType::Uint64;
                     quote_in! { self.body =>
                         $['\r']
                         var $variant_item $typ
@@ -1337,8 +1338,61 @@ impl Bindgen for Func {
                     results.push(Operand::SingleValue(variant_item.into()));
                 }
 
+                // Find the parent variant's name by comparing case names
+                let variant_name = resolve.types.iter().find_map(|(_, type_def)| {
+                    if let TypeDefKind::Variant(v) = &type_def.kind {
+                        // Compare case names to identify the matching variant
+                        if v.cases.len() == variant.cases.len()
+                            && v.cases
+                                .iter()
+                                .zip(variant.cases.iter())
+                                .all(|(a, b)| a.name == b.name)
+                        {
+                            type_def.name.as_ref()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+
+                let variant_name = match variant_name {
+                    Some(name) => name,
+                    None => {
+                        eprintln!("Warning: Could not find variant name, using 'Unknown'");
+                        "Unknown"
+                    }
+                };
+
+                // Pre-generate all prefixed case names to handle string lifetimes
+                let case_names: Vec<String> = variant
+                    .cases
+                    .iter()
+                    .map(|case| {
+                        let capitalized_case = case
+                            .name
+                            .replace("-", " ")
+                            .split_whitespace()
+                            .map(|word| {
+                                let mut chars = word.chars();
+                                match chars.next() {
+                                    None => String::new(),
+                                    Some(first) => {
+                                        first.to_uppercase().collect::<String>()
+                                            + &chars.collect::<String>()
+                                    }
+                                }
+                            })
+                            .collect::<String>();
+                        format!("{}{}", variant_name, capitalized_case)
+                    })
+                    .collect();
+
                 let mut cases: Tokens<Go> = Tokens::new();
-                for (case, (block, block_results)) in variant.cases.iter().zip(blocks) {
+                for ((_case, prefixed_name), (block, block_results)) in
+                    variant.cases.iter().zip(&case_names).zip(blocks)
+                {
                     let mut assignments: Tokens<Go> = Tokens::new();
                     for (i, result) in block_results.iter().enumerate() {
                         let variant_item = &format!("variant{tmp}_{i}");
@@ -1348,7 +1402,9 @@ impl Bindgen for Func {
                         };
                     }
 
-                    let name = GoIdentifier::Public { name: &case.name };
+                    let name = GoIdentifier::Public {
+                        name: prefixed_name,
+                    };
                     quote_in! { cases =>
                         $['\r']
                         case $name:
@@ -1611,7 +1667,9 @@ impl Bindgen for Func {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $wazero_api_encode_f64($operand)
+                    // TODO: This float64() cast is a hack to handle custom types that wrap float64.
+                    // We should properly detect the underlying type and cast appropriately for generalization.
+                    $result := $wazero_api_encode_f64(float64($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1876,17 +1934,21 @@ impl Bindings {
                 let name = GoIdentifier::Public {
                     name: &name.clone().expect("record to have a name"),
                 };
-                let fields = fields.iter().map(|field| {
-                    (
-                        GoIdentifier::Public { name: &field.name },
-                        resolve_type(&field.ty, resolve),
-                    )
-                });
+                let field_types: Vec<_> = fields
+                    .iter()
+                    .map(|field| {
+                        let field_type = match resolve_type(&field.ty, resolve) {
+                            GoType::ValueOrOk(inner_type) => GoType::Pointer(inner_type),
+                            other => other,
+                        };
+                        (GoIdentifier::Public { name: &field.name }, field_type)
+                    })
+                    .collect();
 
                 quote_in! { self.out =>
                     $['\n']
                     type $name struct {
-                        $(for (name, typ) in fields join ($['\r']) => $name $typ)
+                        $(for (name, typ) in field_types join ($['\r']) => $name $typ)
                     }
                 }
             }
@@ -1894,8 +1956,90 @@ impl Bindings {
             TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
             TypeDefKind::Flags(_) => todo!("TODO(#4):generate flags type definition"),
             TypeDefKind::Tuple(_) => todo!("TODO(#4):generate tuple type definition"),
-            TypeDefKind::Variant(_) => {
-                // TODO(#4): Generate aliases if the variant name doesn't match the struct name
+            TypeDefKind::Variant(variant) => {
+                let name = name.clone().expect("variant to have a name");
+                let variant_interface = GoIdentifier::Public { name: &name };
+
+                let variant_function_name = format!(
+                    "is{}",
+                    &name
+                        .replace("-", " ")
+                        .split_whitespace()
+                        .map(|word| {
+                            let mut chars = word.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(first) => {
+                                    first.to_uppercase().collect::<String>()
+                                        + &chars.collect::<String>()
+                                }
+                            }
+                        })
+                        .collect::<String>()
+                );
+                let variant_function = GoIdentifier::Private {
+                    name: &variant_function_name,
+                };
+
+                let case_names: Vec<String> = variant
+                    .cases
+                    .iter()
+                    .map(|case| {
+                        let capitalized_case = case
+                            .name
+                            .replace("-", " ")
+                            .split_whitespace()
+                            .map(|word| {
+                                let mut chars = word.chars();
+                                match chars.next() {
+                                    None => String::new(),
+                                    Some(first) => {
+                                        first.to_uppercase().collect::<String>()
+                                            + &chars.collect::<String>()
+                                    }
+                                }
+                            })
+                            .collect::<String>();
+                        format!("{}{}", &name, capitalized_case)
+                    })
+                    .collect();
+
+                let cases: Vec<_> = variant
+                    .cases
+                    .iter()
+                    .zip(&case_names)
+                    .map(|(case, prefixed_name)| {
+                        let case_name = GoIdentifier::Public {
+                            name: prefixed_name,
+                        };
+                        let case_type = case.ty.as_ref().map(|ty| resolve_type(ty, resolve));
+                        (case_name, case_type)
+                    })
+                    .collect();
+
+                quote_in! { self.out =>
+                    $['\n']
+                    type $variant_interface interface {
+                        $variant_function()
+                    }
+                    $['\n']
+                };
+
+                for (case_name, case_type) in cases {
+                    if let Some(inner_type) = case_type {
+                        quote_in! { self.out =>
+                            type $case_name $inner_type
+                            func ($case_name) $variant_function() {}
+                            $['\n']
+                        };
+                    } else {
+                        quote_in! { self.out =>
+                            type $case_name struct{}
+                            func ($case_name) $variant_function() {}
+                            $['\n']
+                        };
+                    }
+                }
             }
             TypeDefKind::Enum(inner) => {
                 let name = name.clone().expect("enum to have a name");
