@@ -2,18 +2,19 @@ use super::InstructionHandler;
 use crate::context::GenerationContext;
 use anyhow::Result;
 use wit_bindgen_core::abi::Instruction;
-use wit_component::DecodedWasm;
+use wit_bindgen_core::wit_parser::Resolve;
 
+/// Handler for variant-related instructions.
+///
+/// Variants in the component model are discriminated unions that can have associated data,
+/// similar to Rust enums or tagged unions in other languages.
 pub struct VariantInstructionHandler;
 
 impl InstructionHandler for VariantInstructionHandler {
     fn can_handle(&self, instruction: &Instruction) -> bool {
         matches!(
             instruction,
-            Instruction::VariantLift { .. }
-                | Instruction::VariantLower { .. }
-                | Instruction::EnumLift { .. }
-                | Instruction::EnumLower { .. }
+            Instruction::VariantLift { .. } | Instruction::VariantLower { .. }
         )
     }
 
@@ -21,9 +22,12 @@ impl InstructionHandler for VariantInstructionHandler {
         &self,
         _instruction: &Instruction,
         _context: &mut GenerationContext,
-        _decoded: &DecodedWasm,
+        _resolve: &Resolve,
     ) -> Result<()> {
-        // TODO: Implement variant/enum handling
+        // TODO: Implement variant handling
+        // Variants are more complex than enums - they can have payloads
+        // VariantLift: Convert from ABI representation to high-level variant
+        // VariantLower: Convert from high-level variant to ABI representation
         Ok(())
     }
 }

@@ -2,8 +2,12 @@ use super::InstructionHandler;
 use crate::context::GenerationContext;
 use anyhow::Result;
 use wit_bindgen_core::abi::Instruction;
-use wit_component::DecodedWasm;
+use wit_bindgen_core::wit_parser::Resolve;
 
+/// Handler for WebAssembly string instructions.
+///
+/// Processes string-related instructions including lift, lower,
+/// and string encoding operations.
 pub struct StringInstructionHandler;
 
 impl InstructionHandler for StringInstructionHandler {
@@ -18,7 +22,7 @@ impl InstructionHandler for StringInstructionHandler {
         &self,
         _instruction: &Instruction,
         _context: &mut GenerationContext,
-        _decoded: &DecodedWasm,
+        _resolve: &Resolve,
     ) -> Result<()> {
         // TODO: Implement string handling
         Ok(())

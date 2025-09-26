@@ -3,8 +3,12 @@ use crate::context::GenerationContext;
 use anyhow::Result;
 use genco::prelude::*;
 use wit_bindgen_core::abi::Instruction;
-use wit_component::DecodedWasm;
+use wit_bindgen_core::wit_parser::Resolve;
 
+/// Handler for basic WebAssembly instructions.
+///
+/// Processes fundamental instructions such as constants, argument retrieval,
+/// stack manipulation, and basic arithmetic operations.
 pub struct BasicInstructionHandler;
 
 impl InstructionHandler for BasicInstructionHandler {
@@ -41,7 +45,7 @@ impl InstructionHandler for BasicInstructionHandler {
         &self,
         instruction: &Instruction,
         context: &mut GenerationContext,
-        _decoded: &DecodedWasm,
+        _resolve: &Resolve,
     ) -> Result<()> {
         match instruction {
             Instruction::GetArg { nth } => {
@@ -52,10 +56,11 @@ impl InstructionHandler for BasicInstructionHandler {
                 let operand = gravity_go::Operand::Literal(val.to_string());
                 context.push_operand(operand);
             }
-            Instruction::ConstZero { tys: _ } => {
-                // For now, assuming single zero value
-                let operand = gravity_go::Operand::Literal("0".to_string());
-                context.push_operand(operand);
+            Instruction::ConstZero { tys } => {
+                for _ in tys.iter() {
+                    let operand = gravity_go::Operand::Literal("0".to_string());
+                    context.push_operand(operand);
+                }
             }
             Instruction::I32FromBool => {
                 let operands = context.pop_operands(1);
@@ -185,5 +190,216 @@ impl InstructionHandler for BasicInstructionHandler {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wit_bindgen_core::abi::{Instruction, WasmType};
+    use wit_bindgen_core::wit_parser::{ArchitectureSize, Resolve};
+
+    #[test]
+    fn test_get_arg() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        let instruction = Instruction::GetArg { nth: 0 };
+        assert!(handler.can_handle(&instruction));
+
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 1);
+        assert_eq!(
+            context.operands[0],
+            gravity_go::Operand::SingleValue("arg0".to_string())
+        );
+
+        let instruction = Instruction::GetArg { nth: 5 };
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 2);
+        assert_eq!(
+            context.operands[1],
+            gravity_go::Operand::SingleValue("arg5".to_string())
+        );
+    }
+
+    #[test]
+    fn test_i32_const() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        let instruction = Instruction::I32Const { val: 42 };
+        assert!(handler.can_handle(&instruction));
+
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 1);
+        assert_eq!(
+            context.operands[0],
+            gravity_go::Operand::Literal("42".to_string())
+        );
+
+        let instruction = Instruction::I32Const { val: -100 };
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 2);
+        assert_eq!(
+            context.operands[1],
+            gravity_go::Operand::Literal("-100".to_string())
+        );
+    }
+
+    #[test]
+    fn test_const_zero_single() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        let tys = [WasmType::I32];
+        let instruction = Instruction::ConstZero { tys: &tys };
+        assert!(handler.can_handle(&instruction));
+
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 1);
+        assert_eq!(
+            context.operands[0],
+            gravity_go::Operand::Literal("0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_const_zero_multiple() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        let tys = [WasmType::I32, WasmType::I64, WasmType::I32];
+        let instruction = Instruction::ConstZero { tys: &tys };
+
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 3);
+        assert_eq!(
+            context.operands[0],
+            gravity_go::Operand::Literal("0".to_string())
+        );
+        assert_eq!(
+            context.operands[1],
+            gravity_go::Operand::Literal("0".to_string())
+        );
+        assert_eq!(
+            context.operands[2],
+            gravity_go::Operand::Literal("0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_bool_conversions() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        // Test I32FromBool
+        context.push_operand(gravity_go::Operand::SingleValue("myBool".to_string()));
+        let instruction = Instruction::I32FromBool;
+        assert!(handler.can_handle(&instruction));
+
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+        assert_eq!(context.operands.len(), 1);
+        // The result should be a new variable
+        match &context.operands[0] {
+            gravity_go::Operand::SingleValue(name) => assert!(name.starts_with("boolToI32")),
+            _ => panic!("Expected SingleValue operand"),
+        }
+
+        // Check that code was generated
+        let code = context.body.to_string().unwrap();
+        assert!(code.contains("if myBool"));
+        assert!(code.contains("= 1"));
+    }
+
+    #[test]
+    fn test_can_handle() {
+        let handler = BasicInstructionHandler;
+
+        // Should handle these
+        assert!(handler.can_handle(&Instruction::GetArg { nth: 0 }));
+        assert!(handler.can_handle(&Instruction::I32Const { val: 42 }));
+        assert!(handler.can_handle(&Instruction::I32FromBool));
+        assert!(handler.can_handle(&Instruction::BoolFromI32));
+        assert!(handler.can_handle(&Instruction::I32FromU32));
+        assert!(handler.can_handle(&Instruction::U32FromI32));
+        assert!(handler.can_handle(&Instruction::I32FromS32));
+        assert!(handler.can_handle(&Instruction::S32FromI32));
+        assert!(handler.can_handle(&Instruction::ConstZero { tys: &[] }));
+
+        // Should not handle these
+        assert!(!handler.can_handle(&Instruction::StringLift));
+        // TODO: Fix these once we understand the new Instruction API
+        // assert!(!handler.can_handle(&Instruction::OptionLift { ... }));
+        // assert!(!handler.can_handle(&Instruction::ListLift { ... }));
+    }
+
+    #[test]
+    fn test_integer_conversions() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        // Test U32FromI32
+        context.push_operand(gravity_go::Operand::SingleValue("myInt32".to_string()));
+        let instruction = Instruction::U32FromI32;
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+
+        assert_eq!(context.operands.len(), 1);
+        match &context.operands[0] {
+            gravity_go::Operand::SingleValue(name) => assert!(name.starts_with("converted")),
+            _ => panic!("Expected SingleValue operand"),
+        }
+
+        let code = context.body.to_string().unwrap();
+        assert!(code.contains("uint32(myInt32)"));
+    }
+
+    #[test]
+    fn test_i32_load8u() {
+        let handler = BasicInstructionHandler;
+        let mut context = GenerationContext::new();
+        let resolve = Resolve::default();
+
+        // Push a pointer operand
+        context.push_operand(gravity_go::Operand::SingleValue("ptr".to_string()));
+
+        let offset = ArchitectureSize::new(4, 0);
+        let instruction = Instruction::I32Load8U { offset };
+
+        handler
+            .handle(&instruction, &mut context, &resolve)
+            .unwrap();
+
+        assert_eq!(context.operands.len(), 1);
+        match &context.operands[0] {
+            gravity_go::Operand::SingleValue(name) => assert!(name.starts_with("value")),
+            _ => panic!("Expected SingleValue operand"),
+        }
+
+        let code = context.body.to_string().unwrap();
+        assert!(code.contains("Memory().ReadByte"));
+        assert!(code.contains("ptr + 4"));
     }
 }

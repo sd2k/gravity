@@ -11,4 +11,4 @@ package examples
 //go:generate cargo run --bin gravity -- --world records --output ./records/records.go ../target/wasm32-unknown-unknown/release/example_records.wasm
 //go:generate cargo run --bin gravity -- --world example --output ./iface-method-returns-string/example.go ../target/wasm32-unknown-unknown/release/example_iface_method_returns_string.wasm
 //go:generate cargo run --bin gravity -- --world instructions --output ./instructions/bindings.go ../target/wasm32-unknown-unknown/release/example_instructions.wasm
-//go:generate cargo run --bin gravity -- --world outlier --output ./outlier/bindings.go ../target/wasm32-unknown-unknown/release/example_outlier.wasm
+//go:generate cargo run --bin gravity -- --world outlier --output ./outlier/outlier.go ../target/wasm32-unknown-unknown/release/example_outlier.wasm
