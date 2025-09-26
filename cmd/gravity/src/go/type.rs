@@ -37,7 +37,7 @@ pub enum GoType {
     /// Interface type (for variants/discriminated unions)
     Interface,
     // Pointer to another type
-    // Pointer(Box<GoType>),
+    Pointer(Box<GoType>),
     /// Result type with Ok value
     ValueOrOk(Box<GoType>),
     /// Result type with Error value
@@ -120,8 +120,9 @@ impl GoType {
 
             // Nothing represents no value, so no cleanup needed
             GoType::Nothing => false,
-            // TODO - figure out if a pointer needs cleanup, once implemented.
-            // GoType::Pointer(_) => todo!()
+
+            // A pointer probably needs cleanup, not sure?
+            GoType::Pointer(_) => true,
         }
     }
 }
@@ -162,10 +163,10 @@ impl FormatInto<Go> for &GoType {
             // GoType::MultiReturn(typs) => {
             //     tokens.append(quote!($(for typ in typs join (, ) => $typ)))
             // }
-            // GoType::Pointer(typ) => {
-            //     tokens.append(static_literal("*"));
-            //     typ.as_ref().format_into(tokens);
-            // }
+            GoType::Pointer(typ) => {
+                tokens.append(static_literal("*"));
+                typ.as_ref().format_into(tokens);
+            }
             GoType::UserDefined(name) => {
                 let id = GoIdentifier::public(name);
                 id.format_into(tokens)
@@ -243,26 +244,26 @@ mod tests {
         assert_eq!(tokens.to_string().unwrap(), "[]int32");
     }
 
-    // #[test]
-    // fn test_pointer() {
-    //     let typ = GoType::Pointer(Box::new(GoType::String));
-    //     let mut tokens = Tokens::<Go>::new();
-    //     (&typ).format_into(&mut tokens);
-    //     assert_eq!(tokens.to_string().unwrap(), "*string");
-    // }
+    #[test]
+    fn test_pointer() {
+        let typ = GoType::Pointer(Box::new(GoType::String));
+        let mut tokens = Tokens::<Go>::new();
+        (&typ).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "*string");
+    }
 
-    // #[test]
-    // fn test_nested_types() {
-    //     // Test *[]string
-    //     let typ = GoType::Pointer(Box::new(GoType::Slice(Box::new(GoType::String))));
-    //     let mut tokens = Tokens::<Go>::new();
-    //     (&typ).format_into(&mut tokens);
-    //     assert_eq!(tokens.to_string().unwrap(), "*[]string");
+    #[test]
+    fn test_nested_types() {
+        // Test *[]string
+        let typ = GoType::Pointer(Box::new(GoType::Slice(Box::new(GoType::String))));
+        let mut tokens = Tokens::<Go>::new();
+        (&typ).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "*[]string");
 
-    //     // Test [][]uint8
-    //     let typ = GoType::Slice(Box::new(GoType::Slice(Box::new(GoType::Uint8))));
-    //     let mut tokens = Tokens::<Go>::new();
-    //     (&typ).format_into(&mut tokens);
-    //     assert_eq!(tokens.to_string().unwrap(), "[][]uint8");
-    // }
+        // Test [][]uint8
+        let typ = GoType::Slice(Box::new(GoType::Slice(Box::new(GoType::Uint8))));
+        let mut tokens = Tokens::<Go>::new();
+        (&typ).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "[][]uint8");
+    }
 }
