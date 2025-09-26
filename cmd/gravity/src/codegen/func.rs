@@ -1123,8 +1123,26 @@ impl Bindgen for Func<'_> {
                 }
                 results.push(Operand::SingleValue(value))
             }
-            Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
-            Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
+            Instruction::CoreF32FromF32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_encode_f32)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::CoreF64FromF64 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_encode_f64)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::S8FromI32 => {
                 let tmp = self.tmp();
@@ -1182,8 +1200,26 @@ impl Bindgen for Func<'_> {
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::F32FromCoreF32 => todo!("implement instruction: {inst:?}"),
-            Instruction::F64FromCoreF64 => todo!("implement instruction: {inst:?}"),
+            Instruction::F32FromCoreF32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_decode_f32)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::F64FromCoreF64 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_decode_f64)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::TupleLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::TupleLift { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::FlagsLower { .. } => todo!("implement instruction: {inst:?}"),
