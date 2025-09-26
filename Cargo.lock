@@ -363,6 +363,7 @@ dependencies = [
  "heck",
  "rustversion",
  "wasmparser 0.220.1",
+ "wit-bindgen-core 0.36.0",
  "wit-component 0.220.1",
  "wit-parser 0.220.1",
 ]

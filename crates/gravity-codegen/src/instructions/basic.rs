@@ -2,7 +2,7 @@ use super::InstructionHandler;
 use crate::context::GenerationContext;
 use anyhow::Result;
 use genco::prelude::*;
-use gravity_go::{quote, Go, Operand, Tokens};
+use gravity_go::{FormatInto as GravityFormatInto, Go, Tokens};
 use wit_bindgen_core::abi::Instruction;
 use wit_component::DecodedWasm;
 
@@ -14,9 +14,6 @@ impl InstructionHandler for BasicInstructionHandler {
             instruction,
             Instruction::GetArg { .. }
                 | Instruction::I32Const { .. }
-                | Instruction::I64Const { .. }
-                | Instruction::F32Const { .. }
-                | Instruction::F64Const { .. }
                 | Instruction::I32FromBool
                 | Instruction::BoolFromI32
                 | Instruction::I32FromU32
@@ -27,10 +24,6 @@ impl InstructionHandler for BasicInstructionHandler {
                 | Instruction::U64FromI64
                 | Instruction::I64FromS64
                 | Instruction::S64FromI64
-                | Instruction::F32FromFloat32
-                | Instruction::Float32FromF32
-                | Instruction::F64FromFloat64
-                | Instruction::Float64FromF64
                 | Instruction::I32FromU8
                 | Instruction::U8FromI32
                 | Instruction::I32FromS8
@@ -53,28 +46,16 @@ impl InstructionHandler for BasicInstructionHandler {
     ) -> Result<()> {
         match instruction {
             Instruction::GetArg { nth } => {
-                let operand = Operand::SingleValue(format!("arg{}", nth));
+                let operand = gravity_go::Operand::SingleValue(format!("arg{}", nth));
                 context.push_operand(operand);
             }
-            Instruction::I32Const { value } => {
-                let operand = Operand::Literal(value.to_string());
-                context.push_operand(operand);
-            }
-            Instruction::I64Const { value } => {
-                let operand = Operand::Literal(value.to_string());
-                context.push_operand(operand);
-            }
-            Instruction::F32Const { value } => {
-                let operand = Operand::Literal(format!("float32({})", value));
-                context.push_operand(operand);
-            }
-            Instruction::F64Const { value } => {
-                let operand = Operand::Literal(format!("float64({})", value));
+            Instruction::I32Const { val } => {
+                let operand = gravity_go::Operand::Literal(val.to_string());
                 context.push_operand(operand);
             }
             Instruction::ConstZero { tys: _ } => {
                 // For now, assuming single zero value
-                let operand = Operand::Literal("0".to_string());
+                let operand = gravity_go::Operand::Literal("0".to_string());
                 context.push_operand(operand);
             }
             Instruction::I32FromBool => {
@@ -83,12 +64,12 @@ impl InstructionHandler for BasicInstructionHandler {
                 let var = format!("boolToI32{}", tmp);
                 quote_in! { context.body =>
                     $['\r']
-                    var $(var) int32
-                    if $(operands[0]) {
-                        $(var) = 1
+                    var $(&var) int32
+                    if $(&operands[0]) {
+                        $(&var) = 1
                     }
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
             Instruction::BoolFromI32 => {
                 let operands = context.pop_operands(1);
@@ -96,9 +77,9 @@ impl InstructionHandler for BasicInstructionHandler {
                 let var = format!("i32ToBool{}", tmp);
                 quote_in! { context.body =>
                     $['\r']
-                    $(var) := $(operands[0]) != 0
+                    $(&var) := $(&operands[0]) != 0
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
             Instruction::I32FromU32
             | Instruction::U32FromI32
@@ -116,9 +97,9 @@ impl InstructionHandler for BasicInstructionHandler {
                 };
                 quote_in! { context.body =>
                     $['\r']
-                    $(var) := $(target_type)($(operands[0]))
+                    $(&var) := $(target_type)($(&operands[0]))
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
             Instruction::I64FromU64
             | Instruction::U64FromI64
@@ -135,18 +116,11 @@ impl InstructionHandler for BasicInstructionHandler {
                 };
                 quote_in! { context.body =>
                     $['\r']
-                    $(var) := $(target_type)($(operands[0]))
+                    $(&var) := $(target_type)($(&operands[0]))
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
-            Instruction::F32FromFloat32 | Instruction::Float32FromF32 => {
-                // No-op in Go
-                // Operand stays the same
-            }
-            Instruction::F64FromFloat64 | Instruction::Float64FromF64 => {
-                // No-op in Go
-                // Operand stays the same
-            }
+
             Instruction::I32FromU8
             | Instruction::U8FromI32
             | Instruction::I32FromS8
@@ -162,9 +136,9 @@ impl InstructionHandler for BasicInstructionHandler {
                 };
                 quote_in! { context.body =>
                     $['\r']
-                    $(var) := $(target_type)($(operands[0]))
+                    $(&var) := $(target_type)($(&operands[0]))
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
             Instruction::I32FromU16
             | Instruction::U16FromI32
@@ -181,9 +155,9 @@ impl InstructionHandler for BasicInstructionHandler {
                 };
                 quote_in! { context.body =>
                     $['\r']
-                    $(var) := $(target_type)($(operands[0]))
+                    $(&var) := $(target_type)($(&operands[0]))
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
             Instruction::I32Load8U { offset } => {
                 let operands = context.pop_operands(1);
@@ -191,9 +165,9 @@ impl InstructionHandler for BasicInstructionHandler {
                 let var = format!("load8u{}", tmp);
                 quote_in! { context.body =>
                     $['\r']
-                    $(var) := int32(uint8(*(*uint8)(unsafe.Pointer(uintptr($(operands[0]) + $(*offset))))))
+                    $(&var) := int32(uint8(*(*uint8)(unsafe.Pointer(uintptr($(&operands[0]) + $(*offset))))))
                 }
-                context.push_operand(Operand::SingleValue(var));
+                context.push_operand(gravity_go::Operand::SingleValue(var));
             }
             Instruction::CallWasm { name, .. } => {
                 // Handle function calls

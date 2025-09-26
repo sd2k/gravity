@@ -100,3 +100,15 @@ pub enum Operand {
     SingleValue(String),
     MultiValue((String, String)),
 }
+
+impl Operand {
+    /// Returns the primary value of the operand (for single values and literals)
+    /// or the first value of a multi-value tuple
+    pub fn as_string(&self) -> String {
+        match self {
+            Operand::Literal(s) => s.clone(),
+            Operand::SingleValue(s) => s.clone(),
+            Operand::MultiValue((s1, _)) => s1.clone(),
+        }
+    }
+}

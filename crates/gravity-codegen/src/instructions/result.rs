@@ -24,4 +24,3 @@ impl InstructionHandler for ResultInstructionHandler {
         Ok(())
     }
 }
-EOF </dev/null

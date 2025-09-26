@@ -12,6 +12,7 @@ gravity-go = { path = "../../crates/gravity-go" }
 gravity-codegen = { path = "../../crates/gravity-codegen" }
 gravity-wit = { path = "../../crates/gravity-wit" }
 genco = { version = "0.17" }
+wit-bindgen-core = "0.36"
 wit-parser = "0.220"
 wit-component = "0.220"
 wasmparser = "0.220"

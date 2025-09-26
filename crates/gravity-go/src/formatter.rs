@@ -1,6 +1,7 @@
 use crate::types::{GoResult, GoType, Operand};
 use genco::lang::{Go, Lang};
 use genco::prelude::*;
+use genco::tokens::ItemStr;
 
 pub trait FormatInto<L: Lang> {
     fn format_into(self, tokens: &mut Tokens<L>);
@@ -72,23 +73,31 @@ impl FormatInto<Go> for &GoResult {
     }
 }
 
-impl FormatInto<Go> for &Operand {
+// Implement genco's FormatInto for Operand so it can be used in quote! macros
+impl genco::prelude::FormatInto<Go> for &Operand {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         match self {
-            Operand::Literal(val) => tokens.append(val.as_str()),
-            Operand::SingleValue(val) => tokens.append(val.as_str()),
+            Operand::Literal(val) => tokens.append(ItemStr::from(val)),
+            Operand::SingleValue(val) => tokens.append(ItemStr::from(val)),
             Operand::MultiValue((val1, val2)) => {
-                tokens.append(val1.as_str());
+                tokens.append(ItemStr::from(val1));
                 tokens.append(",");
                 tokens.space();
-                tokens.append(val2.as_str());
+                tokens.append(ItemStr::from(val2));
             }
         }
     }
 }
 
-impl FormatInto<Go> for Operand {
+impl genco::prelude::FormatInto<Go> for Operand {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         (&self).format_into(tokens)
+    }
+}
+
+impl genco::prelude::FormatInto<Go> for &mut Operand {
+    fn format_into(self, tokens: &mut Tokens<Go>) {
+        let op: &Operand = self;
+        op.format_into(tokens)
     }
 }
