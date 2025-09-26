@@ -28,3 +28,11 @@ pub static WAZERO_API_ENCODE_I32: GoImport =
     GoImport("github.com/tetratelabs/wazero/api", "EncodeI32");
 pub static WAZERO_API_DECODE_I32: GoImport =
     GoImport("github.com/tetratelabs/wazero/api", "DecodeI32");
+pub static WAZERO_API_ENCODE_F32: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "EncodeF32");
+pub static WAZERO_API_DECODE_F32: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "DecodeF32");
+pub static WAZERO_API_ENCODE_F64: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "EncodeF64");
+pub static WAZERO_API_DECODE_F64: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "DecodeF64");
