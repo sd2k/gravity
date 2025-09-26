@@ -12,4 +12,8 @@ world instructions {
   export s32-roundtrip: func(val: s32) -> s32;
 
   export u32-roundtrip: func(val: u32) -> u32;
+
+  export f32-roundtrip: func(val: f32) -> f32;
+
+  export f64-roundtrip: func(val: f64) -> f64;
 }

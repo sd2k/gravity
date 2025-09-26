@@ -184,3 +184,37 @@ func (i *InstructionsInstance) U32Roundtrip(
 	return result2
 }
 
+func (i *InstructionsInstance) F32Roundtrip(
+	ctx context.Context,
+	val float32,
+) float32 {
+	arg0 := val
+	result0 := api.EncodeF32(arg0)
+	raw1, err1 := i.module.ExportedFunction("f32-roundtrip").Call(ctx, uint64(result0))
+	// The return type doesn't contain an error so we panic if one is encountered
+	if err1 != nil {
+		panic(err1)
+	}
+
+	results1 := raw1[0]
+	result2 := api.DecodeF32(results1)
+	return result2
+}
+
+func (i *InstructionsInstance) F64Roundtrip(
+	ctx context.Context,
+	val float64,
+) float64 {
+	arg0 := val
+	result0 := api.EncodeF64(arg0)
+	raw1, err1 := i.module.ExportedFunction("f64-roundtrip").Call(ctx, uint64(result0))
+	// The return type doesn't contain an error so we panic if one is encountered
+	if err1 != nil {
+		panic(err1)
+	}
+
+	results1 := raw1[0]
+	result2 := api.DecodeF64(results1)
+	return result2
+}
+

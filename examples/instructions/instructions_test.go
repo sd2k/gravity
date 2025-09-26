@@ -1,12 +1,16 @@
 package instructions
 
 import (
+	"fmt"
 	"iter"
 	"math"
+	"math/rand/v2"
 	"testing"
 )
 
-func inclusive[Num interface { ~int8 | ~uint8 | ~int16 | ~uint16 }](start Num, end Num) iter.Seq[Num] {
+func inclusive[Num interface {
+	~int8 | ~uint8 | ~int16 | ~uint16
+}](start Num, end Num) iter.Seq[Num] {
 	return func(yield func(v Num) bool) {
 		var next Num = start
 		for {
@@ -21,7 +25,7 @@ func inclusive[Num interface { ~int8 | ~uint8 | ~int16 | ~uint16 }](start Num, e
 		}
 	}
 }
-func inclusiveStep[Num interface { ~int32 | ~uint32 }](start Num, end Num, step Num) iter.Seq[Num] {
+func inclusiveStep[Num interface{ ~int32 | ~uint32 }](start Num, end Num, step Num) iter.Seq[Num] {
 	return func(yield func(v Num) bool) {
 		var next Num = start
 		for {
@@ -32,7 +36,7 @@ func inclusiveStep[Num interface { ~int32 | ~uint32 }](start Num, end Num, step 
 				return
 			}
 
-			if end - step > next {
+			if end-step > next {
 				next += step
 			} else {
 				next = end
@@ -164,5 +168,57 @@ func Test_U32Roundtrip(t *testing.T) {
 		if actual != expected {
 			t.Errorf("expected: %d, but got: %d", expected, actual)
 		}
+	}
+}
+
+func Test_F32Roundtrip(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	// Generate a bunch of random floats and check they all roundtrip correctly.
+	seed := 123456
+	rng := rand.New(rand.NewPCG(uint64(seed), uint64(seed)))
+	for i := range 1000 {
+		t.Run(fmt.Sprintf("i: %d", i), func(t *testing.T) {
+			expected := rng.Float32()
+			if actual := ins.F32Roundtrip(t.Context(), expected); actual != expected {
+				t.Errorf("expected: %f, but got: %f", expected, actual)
+			}
+		})
+	}
+}
+
+func Test_F64Roundtrip(t *testing.T) {
+	fac, err := NewInstructionsFactory(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fac.Close(t.Context())
+
+	ins, err := fac.Instantiate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ins.Close(t.Context())
+
+	// Generate a bunch of random floats and check they all roundtrip correctly.
+	seed := 123456
+	rng := rand.New(rand.NewPCG(uint64(seed), uint64(seed)))
+	for i := range 1000 {
+		t.Run(fmt.Sprintf("i: %d", i), func(t *testing.T) {
+			expected := rng.Float64()
+			if actual := ins.F64Roundtrip(t.Context(), expected); actual != expected {
+				t.Errorf("expected: %f, but got: %f", expected, actual)
+			}
+		})
 	}
 }
