@@ -29,7 +29,7 @@ impl From<GoIdentifier<'_>> for String {
     }
 }
 
-impl<'a> FormatInto<Go> for GoIdentifier<'a> {
+impl FormatInto<Go> for GoIdentifier<'_> {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         match self {
             GoIdentifier::Public { name } => {

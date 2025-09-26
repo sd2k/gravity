@@ -1,11 +1,17 @@
 use anyhow::Result;
 use genco::prelude::*;
-use gravity_go::{quote, Go, Tokens};
+use gravity_go::{Go, Tokens};
 use wit_bindgen_core::wit_parser::{Function, TypeDef};
 
 pub struct BindingsGenerator {
     output: Tokens<Go>,
     types: Vec<TypeDef>,
+}
+
+impl Default for BindingsGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BindingsGenerator {
@@ -26,7 +32,7 @@ impl BindingsGenerator {
         Ok(())
     }
 
-    pub fn add_function(&mut self, func: &Function) -> Result<()> {
+    pub fn add_function(&mut self, _func: &Function) -> Result<()> {
         // TODO: Generate function binding
         quote_in! { self.output =>
             $['\n']
@@ -35,7 +41,7 @@ impl BindingsGenerator {
         Ok(())
     }
 
-    pub fn add_import(&mut self, module: &str, items: Vec<String>) -> Result<()> {
+    pub fn add_import(&mut self, _module: &str, items: Vec<String>) -> Result<()> {
         quote_in! { self.output =>
             import (
                 $(for item in items join ($['\r']) => $(quoted(item)))

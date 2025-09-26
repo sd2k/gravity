@@ -1,5 +1,4 @@
-use anyhow::Result;
-use gravity_go::{quote, Go, GoType, Operand, Tokens};
+use gravity_go::{Go, GoType, Operand, Tokens};
 use std::collections::HashMap;
 
 pub struct GenerationContext {
@@ -8,6 +7,12 @@ pub struct GenerationContext {
     pub operands: Vec<Operand>,
     pub vars: HashMap<String, GoType>,
     tmp_counter: usize,
+}
+
+impl Default for GenerationContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GenerationContext {

@@ -8,7 +8,6 @@ pub mod variant;
 
 use crate::context::GenerationContext;
 use anyhow::Result;
-use gravity_go::Operand;
 use wit_bindgen_core::abi::Instruction;
 use wit_component::DecodedWasm;
 

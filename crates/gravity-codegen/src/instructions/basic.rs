@@ -2,7 +2,6 @@ use super::InstructionHandler;
 use crate::context::GenerationContext;
 use anyhow::Result;
 use genco::prelude::*;
-use gravity_go::{FormatInto as GravityFormatInto, Go, Tokens};
 use wit_bindgen_core::abi::Instruction;
 use wit_component::DecodedWasm;
 
@@ -177,7 +176,7 @@ impl InstructionHandler for BasicInstructionHandler {
             }
             Instruction::CallWasm { name, .. } => {
                 // Handle function calls
-                let func_name = name.replace('.', "_");
+                let _func_name = name.replace('.', "_");
                 quote_in! { context.body =>
                     $['\r']
                     // Call to $(func_name) - implementation depends on function signature

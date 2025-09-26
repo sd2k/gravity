@@ -8,16 +8,12 @@ default:
 build:
     cargo build --release
 
-# Run all tests (unit tests + UI tests)
-test: test-unit test-ui
+# Run all tests
+test: test-unit
 
 # Run unit tests
 test-unit:
     cargo test --workspace
-
-# Run UI tests
-test-ui:
-    cargo test --test ui
 
 # Test all examples
 test-examples: build
