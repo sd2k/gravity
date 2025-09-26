@@ -1,0 +1,15 @@
+[package]
+name = "gravity2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gravity-codegen = { path = "../../crates/gravity-codegen" }
+gravity-go = { path = "../../crates/gravity-go" }
+clap = { workspace = true }
+wit-bindgen-core = { workspace = true }
+wit-component = { workspace = true }
+genco = { workspace = true }
+anyhow = { workspace = true }
+heck = { workspace = true }
+hex = "0.4"
