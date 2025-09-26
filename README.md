@@ -40,20 +40,20 @@ To produce Go files with good indentation, this tool should be installed with a
 Rust toolchain at least as recent as 1.88.0. For example:
 
 ```bash
-rustup toolchain install 1.90.0
+rustup toolchain install stable
 ```
 
 From inside this directory, you can install using the command:
 
 ```bash
-cargo +1.90.0 install --path cmd/gravity
+cargo install --path cmd/gravity
 ```
 
 Or alternatively, you can install the latest published version from crates.io
 using this command:
 
 ```bash
-cargo +1.90.0 install arcjet-gravity
+cargo install arcjet-gravity
 ```
 
 ## Usage
