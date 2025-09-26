@@ -640,7 +640,7 @@ impl Bindgen for Func {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $wazero_api_decode_u32($operand)
+                    $result := $wazero_api_decode_u32(uint64($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1409,16 +1409,168 @@ impl Bindgen for Func {
             Instruction::I32Load8S { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I32Load16U { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I32Load16S { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::I64Load { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F32Load { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F64Load { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::I64Load { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tmp = self.tmp();
+                let value = &format!("value{tmp}");
+                let ok = &format!("ok{tmp}");
+                let default = &format!("default{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if !$ok {
+                                var $default $(typ.as_ref())
+                                return $default, $errors_new("failed to read i64 from memory")
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if !$ok {
+                                return $errors_new("failed to read i64 from memory")
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if !$ok {
+                                panic($errors_new("failed to read i64 from memory"))
+                            }
+                        }
+                    })
+                };
+                results.push(Operand::SingleValue(value.into()));
+            }
+            Instruction::F32Load { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tmp = self.tmp();
+                let value = &format!("value{tmp}");
+                let ok = &format!("ok{tmp}");
+                let default = &format!("default{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if !$ok {
+                                var $default $(typ.as_ref())
+                                return $default, $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if !$ok {
+                                return $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if !$ok {
+                                panic($errors_new("failed to read f64 from memory"))
+                            }
+                        }
+                    })
+                };
+                results.push(Operand::SingleValue(value.into()));
+            }
+            Instruction::F64Load { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tmp = self.tmp();
+                let value = &format!("value{tmp}");
+                let ok = &format!("ok{tmp}");
+                let default = &format!("default{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if !$ok {
+                                var $default $(typ.as_ref())
+                                return $default, $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if !$ok {
+                                return $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if !$ok {
+                                panic($errors_new("failed to read f64 from memory"))
+                            }
+                        }
+                    })
+                };
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::I32Store16 { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I64Store { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F32Store { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F64Store { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::F32Store { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tag = &operands[0];
+                let ptr = &operands[1];
+                match &self.direction {
+                    Direction::Export => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            i.module.Memory().WriteUint64Le($ptr+$offset, $tag)
+                        }
+                    }
+                    Direction::Import { .. } => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            mod.Memory().WriteUint64Le($ptr+$offset, $tag)
+                        }
+                    }
+                }
+            }
+            Instruction::F64Store { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tag = &operands[0];
+                let ptr = &operands[1];
+                match &self.direction {
+                    Direction::Export => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            i.module.Memory().WriteUint64Le($ptr+$offset, $tag)
+                        }
+                    }
+                    Direction::Import { .. } => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            mod.Memory().WriteUint64Le($ptr+$offset, $tag)
+                        }
+                    }
+                }
+            }
             Instruction::I32FromChar => todo!("implement instruction: {inst:?}"),
-            Instruction::I64FromU64 => todo!("implement instruction: {inst:?}"),
-            Instruction::I64FromS64 => todo!("implement instruction: {inst:?}"),
+            Instruction::I64FromU64 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := int64($operand)
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
+            Instruction::I64FromS64 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $operand
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::I32FromS32 => {
                 let tmp = self.tmp();
                 let value = format!("value{tmp}");
@@ -1468,6 +1620,7 @@ impl Bindgen for Func {
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
+                    $(comment(&["S8FromI32"]))
                     $['\r']
                     $result := int8($wazero_api_decode_i32($operand))
                 };
@@ -1478,6 +1631,7 @@ impl Bindgen for Func {
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
+                    $(comment(&["U8FromI32"]))
                     $['\r']
                     $result := uint8($wazero_api_decode_u32($operand))
                 };
@@ -1514,7 +1668,17 @@ impl Bindgen for Func {
                 results.push(Operand::SingleValue(result.into()));
             }
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
-            Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
+            Instruction::U64FromI64 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $(comment(&["U64FromI64"]))
+                    $['\r']
+                    $(&value) := uint64($operand)
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
             Instruction::F32FromCoreF32 => {
                 let tmp = self.tmp();
