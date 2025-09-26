@@ -1114,22 +1114,25 @@ impl Bindgen for Func {
 
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
+                let ok = &format!("ok{tmp}");
                 let typ = resolve_type(payload, resolve);
                 let op = &operands[0];
 
                 quote_in! { self.body =>
                     $['\r']
-                    var $result *$typ
+                    var $result $typ
+                    var $ok bool
                     if $op == 0 {
                         $none
-                        $result = nil
+                        $ok = false
                     } else {
                         $some
-                        $result = &$some_result
+                        $ok = true
+                        $result = $some_result
                     }
                 };
 
-                results.push(Operand::SingleValue(result.into()));
+                results.push(Operand::MultiValue((result.into(), ok.into())));
             }
             Instruction::OptionLower {
                 payload: Type::String,
@@ -1217,10 +1220,61 @@ impl Bindgen for Func {
             Instruction::RecordLift { record, name, .. } => {
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
-                let fields = record
+
+                // Generate pointer conversion code for optional fields
+                let converted_operands: Vec<_> = record
                     .fields
                     .iter()
                     .zip(operands)
+                    .enumerate()
+                    .map(|(i, (field, op))| {
+                        let field_type = match resolve_type(&field.ty, resolve) {
+                            GoType::ValueOrOk(inner_type) => GoType::Pointer(inner_type),
+                            other => other,
+                        };
+                        let op_clone = op.clone();
+                        quote_in! { self.body =>
+                            $['\r']
+                        };
+                        match (&field_type, &op_clone) {
+                            (GoType::Pointer(inner_type), Operand::MultiValue((val, ok))) => {
+                                quote_in! { self.body =>
+                                    $['\r']
+                                };
+                                let ptr_var_name = format!("ptr{tmp}x{i}");
+                                quote_in! { self.body =>
+                                    $['\r']
+                                };
+                                let val_ident = GoIdentifier::Local { name: val };
+                                let ok_ident = GoIdentifier::Local { name: ok };
+                                let ptr_var_ident = GoIdentifier::Local {
+                                    name: &ptr_var_name,
+                                };
+                                quote_in! { self.body =>
+                                    $['\r']
+                                    var $ptr_var_ident *$(inner_type.as_ref())
+                                    if $ok_ident {
+                                        $ptr_var_ident = &$val_ident
+                                    } else {
+                                        $ptr_var_ident = nil
+                                    }
+                                };
+                                Operand::SingleValue(ptr_var_name)
+                            }
+                            _ => {
+                                quote_in! { self.body =>
+                                    $['\r']
+                                };
+                                op_clone
+                            }
+                        }
+                    })
+                    .collect();
+
+                let fields = record
+                    .fields
+                    .iter()
+                    .zip(&converted_operands)
                     .map(|(field, op)| (GoIdentifier::Public { name: &field.name }, op));
 
                 quote_in! {self.body =>
@@ -1678,7 +1732,6 @@ impl Bindgen for Func {
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
-                    $(comment(&["S8FromI32"]))
                     $['\r']
                     $result := int8($wazero_api_decode_i32($operand))
                 };
@@ -1689,7 +1742,6 @@ impl Bindgen for Func {
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
-                    $(comment(&["U8FromI32"]))
                     $['\r']
                     $result := uint8($wazero_api_decode_u32($operand))
                 };
@@ -1731,7 +1783,6 @@ impl Bindgen for Func {
                 let value = format!("value{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
-                    $(comment(&["U64FromI64"]))
                     $['\r']
                     $(&value) := uint64($operand)
                 }
