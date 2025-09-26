@@ -3,7 +3,7 @@ use std::mem;
 use genco::prelude::*;
 use wit_bindgen_core::{
     abi::{Bindgen, Instruction},
-    wit_parser::{Alignment, ArchitectureSize, Resolve, Result_, SizeAlign, Type},
+    wit_parser::{Alignment, ArchitectureSize, Resolve, Result_, SizeAlign, Type, TypeDefKind},
 };
 
 use crate::{
@@ -793,25 +793,22 @@ impl Bindgen for Func<'_> {
 
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
-                let ok = &format!("ok{tmp}");
                 let typ = resolve_type(payload, resolve);
                 let op = &operands[0];
 
                 quote_in! { self.body =>
                     $['\r']
-                    var $result $typ
-                    var $ok bool
+                    var $result *$typ
                     if $op == 0 {
                         $none
-                        $ok = false
+                        $result = nil
                     } else {
                         $some
-                        $ok = true
-                        $result = $some_result
+                        $result = &$some_result
                     }
                 };
 
-                results.push(Operand::MultiValue((result.into(), ok.into())));
+                results.push(Operand::SingleValue(result.into()));
             }
             Instruction::OptionLower {
                 payload: Type::String,
@@ -1007,9 +1004,10 @@ impl Bindgen for Func<'_> {
                 let value = &operands[0];
                 let default = &format!("default{tmp}");
 
-                for (i, typ) in result_types.iter().enumerate() {
+                for (i, _typ) in result_types.iter().enumerate() {
                     let variant_item = &format!("variant{tmp}_{i}");
-                    let typ = resolve_wasm_type(typ);
+                    // TODO: Use uint64 for all variant variables since they hold encoded WebAssembly values
+                    let typ = GoType::Uint64;
                     quote_in! { self.body =>
                         $['\r']
                         var $variant_item $typ
@@ -1017,8 +1015,60 @@ impl Bindgen for Func<'_> {
                     results.push(Operand::SingleValue(variant_item.into()));
                 }
 
+                // Find the parent variant's name by comparing case names
+                let variant_name = resolve.types.iter().find_map(|(_, type_def)| {
+                    if let TypeDefKind::Variant(v) = &type_def.kind {
+                        // Compare case names to identify the matching variant
+                        if v.cases.len() == variant.cases.len()
+                            && v.cases
+                                .iter()
+                                .zip(variant.cases.iter())
+                                .all(|(a, b)| a.name == b.name)
+                        {
+                            type_def.name.as_ref()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+
+                let variant_name = match variant_name {
+                    Some(name) => name,
+                    None => {
+                        eprintln!("Warning: Could not find variant name, using 'Unknown'");
+                        "Unknown"
+                    }
+                };
+
+                // Pre-generate all prefixed case names to handle string lifetimes
+                let case_names: Vec<String> = variant
+                    .cases
+                    .iter()
+                    .map(|case| {
+                        let capitalized_case = case
+                            .name
+                            .replace("-", " ")
+                            .split_whitespace()
+                            .map(|word| {
+                                let mut chars = word.chars();
+                                match chars.next() {
+                                    None => String::new(),
+                                    Some(first) => {
+                                        first.to_uppercase().collect::<String>() + chars.as_str()
+                                    }
+                                }
+                            })
+                            .collect::<String>();
+                        format!("{}{}", variant_name, capitalized_case)
+                    })
+                    .collect();
+
                 let mut cases: Tokens<Go> = Tokens::new();
-                for (case, (block, block_results)) in variant.cases.iter().zip(blocks) {
+                for ((_case, (block, block_results)), case_name) in
+                    variant.cases.iter().zip(blocks).zip(case_names.iter())
+                {
                     let mut assignments: Tokens<Go> = Tokens::new();
                     for (i, result) in block_results.iter().enumerate() {
                         let variant_item = &format!("variant{tmp}_{i}");
@@ -1028,7 +1078,7 @@ impl Bindgen for Func<'_> {
                         };
                     }
 
-                    let name = GoIdentifier::public(case.name.clone());
+                    let name = GoIdentifier::public(case_name.clone());
                     quote_in! { cases =>
                         $['\r']
                         case $name:
@@ -1281,7 +1331,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $(&self.go_imports.wazero_api_encode_f32)($operand)
+                    $result := $(&self.go_imports.wazero_api_encode_f32)(float32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1291,7 +1341,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $(&self.go_imports.wazero_api_encode_f64)($operand)
+                    $result := $(&self.go_imports.wazero_api_encode_f64)(float64($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
