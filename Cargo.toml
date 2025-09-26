@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["cmd/*", "examples/*"]
+members = ["cmd/*", "crates/*", "examples/*"]
 
 [patch.crates-io]
 # rand 0.9 merged into main, waiting for a new release.

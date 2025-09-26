@@ -1,0 +1,12 @@
+[package]
+name = "gravity-go"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+genco = "0.17"
+anyhow = "1.0"
+heck = "0.5"
+
+[dev-dependencies]
+pretty_assertions = "1.4"

@@ -1,0 +1,17 @@
+[package]
+name = "gravity-codegen"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gravity-go = { path = "../gravity-go" }
+gravity-wit = { path = "../gravity-wit" }
+genco = "0.17"
+wit-bindgen-core = "0.36"
+wit-parser = "0.220"
+wit-component = "0.220"
+anyhow = "1.0"
+heck = "0.5"
+
+[dev-dependencies]
+pretty_assertions = "1.4"

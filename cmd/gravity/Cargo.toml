@@ -1,29 +1,23 @@
 [package]
-authors = ["The Arcjet team"]
-categories = ["wasm"]
-default-run = "gravity"
-name = "arcjet-gravity"
-version = "0.0.2"
-edition = "2024"
-license = "Apache-2.0"
-repository = "https://github.com/arcjet/gravity"
-description = """
-Gravity is a host generator for WebAssembly Components. It currently targets Wazero, a zero dependency WebAssembly runtime for Go.
-"""
-build = "build.rs"
+name = "gravity"
+version = "0.1.0"
+edition = "2021"
 
 [[bin]]
 name = "gravity"
 path = "src/main.rs"
 
 [dependencies]
-clap = "=4.5.47"
-genco = "=0.17.10"
-wit-bindgen-core = "=0.42.1"
-wit-component = "=0.230.0"
-
-[dev-dependencies]
-wit-bindgen = "=0.42.1"
+gravity-go = { path = "../../crates/gravity-go" }
+gravity-codegen = { path = "../../crates/gravity-codegen" }
+gravity-wit = { path = "../../crates/gravity-wit" }
+genco = { version = "0.17" }
+wit-parser = "0.220"
+wit-component = "0.220"
+wasmparser = "0.220"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+heck = "0.5"
 
 [build-dependencies]
 rustversion = "=1.0.22"

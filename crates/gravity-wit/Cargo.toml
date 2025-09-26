@@ -1,0 +1,13 @@
+[package]
+name = "gravity-wit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wit-bindgen-core = "0.36"
+wit-parser = "0.220"
+wit-component = "0.220"
+anyhow = "1.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4"

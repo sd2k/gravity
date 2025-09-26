@@ -1,0 +1,210 @@
+use super::InstructionHandler;
+use crate::context::GenerationContext;
+use anyhow::Result;
+use genco::prelude::*;
+use gravity_go::{quote, Go, Operand, Tokens};
+use wit_bindgen_core::abi::Instruction;
+use wit_component::DecodedWasm;
+
+pub struct BasicInstructionHandler;
+
+impl InstructionHandler for BasicInstructionHandler {
+    fn can_handle(&self, instruction: &Instruction) -> bool {
+        matches!(
+            instruction,
+            Instruction::GetArg { .. }
+                | Instruction::I32Const { .. }
+                | Instruction::I64Const { .. }
+                | Instruction::F32Const { .. }
+                | Instruction::F64Const { .. }
+                | Instruction::I32FromBool
+                | Instruction::BoolFromI32
+                | Instruction::I32FromU32
+                | Instruction::U32FromI32
+                | Instruction::I32FromS32
+                | Instruction::S32FromI32
+                | Instruction::I64FromU64
+                | Instruction::U64FromI64
+                | Instruction::I64FromS64
+                | Instruction::S64FromI64
+                | Instruction::F32FromFloat32
+                | Instruction::Float32FromF32
+                | Instruction::F64FromFloat64
+                | Instruction::Float64FromF64
+                | Instruction::I32FromU8
+                | Instruction::U8FromI32
+                | Instruction::I32FromS8
+                | Instruction::S8FromI32
+                | Instruction::I32FromU16
+                | Instruction::U16FromI32
+                | Instruction::I32FromS16
+                | Instruction::S16FromI32
+                | Instruction::I32Load8U { .. }
+                | Instruction::CallWasm { .. }
+                | Instruction::ConstZero { .. }
+        )
+    }
+
+    fn handle(
+        &self,
+        instruction: &Instruction,
+        context: &mut GenerationContext,
+        _decoded: &DecodedWasm,
+    ) -> Result<()> {
+        match instruction {
+            Instruction::GetArg { nth } => {
+                let operand = Operand::SingleValue(format!("arg{}", nth));
+                context.push_operand(operand);
+            }
+            Instruction::I32Const { value } => {
+                let operand = Operand::Literal(value.to_string());
+                context.push_operand(operand);
+            }
+            Instruction::I64Const { value } => {
+                let operand = Operand::Literal(value.to_string());
+                context.push_operand(operand);
+            }
+            Instruction::F32Const { value } => {
+                let operand = Operand::Literal(format!("float32({})", value));
+                context.push_operand(operand);
+            }
+            Instruction::F64Const { value } => {
+                let operand = Operand::Literal(format!("float64({})", value));
+                context.push_operand(operand);
+            }
+            Instruction::ConstZero { tys: _ } => {
+                // For now, assuming single zero value
+                let operand = Operand::Literal("0".to_string());
+                context.push_operand(operand);
+            }
+            Instruction::I32FromBool => {
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("boolToI32{}", tmp);
+                quote_in! { context.body =>
+                    $['\r']
+                    var $(var) int32
+                    if $(operands[0]) {
+                        $(var) = 1
+                    }
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::BoolFromI32 => {
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("i32ToBool{}", tmp);
+                quote_in! { context.body =>
+                    $['\r']
+                    $(var) := $(operands[0]) != 0
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::I32FromU32
+            | Instruction::U32FromI32
+            | Instruction::I32FromS32
+            | Instruction::S32FromI32 => {
+                // These are no-ops in Go as int32 and uint32 can be freely converted
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("converted{}", tmp);
+                let target_type = match instruction {
+                    Instruction::I32FromU32 | Instruction::I32FromS32 => "int32",
+                    Instruction::U32FromI32 => "uint32",
+                    Instruction::S32FromI32 => "int32",
+                    _ => unreachable!(),
+                };
+                quote_in! { context.body =>
+                    $['\r']
+                    $(var) := $(target_type)($(operands[0]))
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::I64FromU64
+            | Instruction::U64FromI64
+            | Instruction::I64FromS64
+            | Instruction::S64FromI64 => {
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("converted{}", tmp);
+                let target_type = match instruction {
+                    Instruction::I64FromU64 | Instruction::I64FromS64 => "int64",
+                    Instruction::U64FromI64 => "uint64",
+                    Instruction::S64FromI64 => "int64",
+                    _ => unreachable!(),
+                };
+                quote_in! { context.body =>
+                    $['\r']
+                    $(var) := $(target_type)($(operands[0]))
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::F32FromFloat32 | Instruction::Float32FromF32 => {
+                // No-op in Go
+                // Operand stays the same
+            }
+            Instruction::F64FromFloat64 | Instruction::Float64FromF64 => {
+                // No-op in Go
+                // Operand stays the same
+            }
+            Instruction::I32FromU8
+            | Instruction::U8FromI32
+            | Instruction::I32FromS8
+            | Instruction::S8FromI32 => {
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("converted{}", tmp);
+                let target_type = match instruction {
+                    Instruction::I32FromU8 | Instruction::I32FromS8 => "int32",
+                    Instruction::U8FromI32 => "uint8",
+                    Instruction::S8FromI32 => "int8",
+                    _ => unreachable!(),
+                };
+                quote_in! { context.body =>
+                    $['\r']
+                    $(var) := $(target_type)($(operands[0]))
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::I32FromU16
+            | Instruction::U16FromI32
+            | Instruction::I32FromS16
+            | Instruction::S16FromI32 => {
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("converted{}", tmp);
+                let target_type = match instruction {
+                    Instruction::I32FromU16 | Instruction::I32FromS16 => "int32",
+                    Instruction::U16FromI32 => "uint16",
+                    Instruction::S16FromI32 => "int16",
+                    _ => unreachable!(),
+                };
+                quote_in! { context.body =>
+                    $['\r']
+                    $(var) := $(target_type)($(operands[0]))
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::I32Load8U { offset } => {
+                let operands = context.pop_operands(1);
+                let tmp = context.tmp();
+                let var = format!("load8u{}", tmp);
+                quote_in! { context.body =>
+                    $['\r']
+                    $(var) := int32(uint8(*(*uint8)(unsafe.Pointer(uintptr($(operands[0]) + $(*offset))))))
+                }
+                context.push_operand(Operand::SingleValue(var));
+            }
+            Instruction::CallWasm { name, .. } => {
+                // Handle function calls
+                let func_name = name.replace('.', "_");
+                quote_in! { context.body =>
+                    $['\r']
+                    // Call to $(func_name) - implementation depends on function signature
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
