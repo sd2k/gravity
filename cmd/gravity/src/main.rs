@@ -1669,7 +1669,7 @@ impl Bindgen for Func {
                     $['\r']
                     $(&value) := int64($operand)
                 }
-                results.push(Operand::SingleValue(value.into()));
+                results.push(Operand::SingleValue(value));
             }
             Instruction::I64FromS64 => {
                 let tmp = self.tmp();
@@ -1679,7 +1679,7 @@ impl Bindgen for Func {
                     $['\r']
                     $(&value) := $operand
                 }
-                results.push(Operand::SingleValue(value.into()));
+                results.push(Operand::SingleValue(value));
             }
             Instruction::I32FromS32 => {
                 let tmp = self.tmp();
@@ -1786,7 +1786,7 @@ impl Bindgen for Func {
                     $['\r']
                     $(&value) := uint64($operand)
                 }
-                results.push(Operand::SingleValue(value.into()));
+                results.push(Operand::SingleValue(value));
             }
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
             Instruction::F32FromCoreF32 => {
