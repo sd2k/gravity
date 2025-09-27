@@ -1,23 +1,9 @@
 use crate::identifier::GoIdentifier;
 use crate::types::{GoResult, GoType, Operand};
-use genco::lang::{Go, Lang};
+use genco::lang::Go;
 use genco::prelude::*;
 use genco::tokens::{static_literal, ItemStr};
 
-/// Trait for formatting types into language-specific tokens.
-///
-/// This trait allows types to be formatted into token streams
-/// for code generation. It's primarily used for Go code generation
-/// but is generic over the language type.
-pub trait FormatInto<L: Lang> {
-    /// Formats the type into the provided token stream.
-    ///
-    /// # Arguments
-    /// * `tokens` - The token stream to append formatted output to.
-    fn format_into(self, tokens: &mut Tokens<L>);
-}
-
-// Implement only genco's FormatInto trait (not our own) to avoid conflicts
 impl genco::prelude::FormatInto<Go> for GoType {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         (&self).format_into(tokens)

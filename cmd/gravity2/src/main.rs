@@ -3,10 +3,11 @@ use std::{fs, process::ExitCode};
 use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, Command};
 use genco::prelude::*;
-use gravity_codegen::GenerationContext;
-use gravity_go::{Go, GoResult, GoType};
-use heck::ToUpperCamelCase;
-use wit_bindgen_core::wit_parser::{Resolve, Type, TypeDefKind, WorldItem};
+use gravity_codegen::{
+    generate_imports_with_chains, imports::GoImports, FactoryConfig, FactoryGenerator,
+    GenerationContext,
+};
+use gravity_go::{embed, Go, GoIdentifier};
 
 // TODO: Move to gravity-cli crate
 const PRIMARY_WORLD_NAME: &str = "root";
@@ -52,7 +53,7 @@ fn main() -> Result<ExitCode> {
 
     // Decode the component metadata
     let (module, bindgen) = wit_component::metadata::decode(&wasm)
-        .map(|(module, bindgen)| (module.unwrap_or(wasm.clone()), bindgen))
+        .map(|(module, bindgen)| (module.unwrap_or(wasm), bindgen))
         .context("File should be a valid WebAssembly module")?;
 
     // Get the world
@@ -62,7 +63,16 @@ fn main() -> Result<ExitCode> {
         .iter()
         .find(|(_, w)| w.name == *selected_world)
         .map(|(id, _)| id)
-        .ok_or_else(|| anyhow::anyhow!("World '{}' not found", selected_world))?;
+        .or_else(|| {
+            // If the requested world is not found, try to find any world
+            eprintln!("World '{}' not found. Available worlds:", selected_world);
+            for (_, world) in bindgen.resolve.worlds.iter() {
+                eprintln!("  - {}", world.name);
+            }
+            // Use the first available world if the requested one doesn't exist
+            bindgen.resolve.worlds.iter().next().map(|(id, _)| id)
+        })
+        .ok_or_else(|| anyhow::anyhow!("No worlds found in the WebAssembly component"))?;
 
     let world = bindgen.resolve.worlds.get(world_id).unwrap();
 
@@ -70,169 +80,71 @@ fn main() -> Result<ExitCode> {
     let mut context = GenerationContext::new();
 
     let package_name = selected_world.replace('-', "_");
+    let wasm_file = format!("{}.wasm", &package_name);
 
-    // TODO: Generate imports based on what's actually used
-    quote_in! { context.out =>
-        import (
-            $(quoted("context"))
-            $(quoted("embed"))
-            $(quoted("errors"))
-            $(quoted("github.com/tetratelabs/wazero"))
-            $(quoted("github.com/tetratelabs/wazero/api"))
-        )
-        $['\n']
+    // Generate embedded WASM
+    let wasm_var_name = &GoIdentifier::Private {
+        name: &format!("wasm-file-{}", &selected_world),
     };
-
-    // Generate embedded WASM if requested
     if inline_wasm {
+        let hex_rows = module
+            .chunks(16)
+            .map(|bytes| {
+                quote! {
+                    $(for b in bytes join ( ) => $(format!("0x{b:02x},")))
+                }
+            })
+            .collect::<Vec<Tokens<Go>>>();
+
+        // TODO(#16): Don't use the internal bindings.out field
         quote_in! { context.out =>
-            //go:embed $(hex::encode(&module))
-            var rawWasm []byte
-            $['\n']
+            var $wasm_var_name = []byte{
+                $(for row in hex_rows join ($['\r']) => $row)
+            }
         };
     } else {
+        // TODO(#16): Don't use the internal bindings.out field
         quote_in! { context.out =>
-            //go:embed $(format!("{}.wasm", selected_world))
-            var rawWasm []byte
+            import _ "embed"
             $['\n']
-        };
+            $(embed(wasm_file))
+            var $wasm_var_name []byte
+            $['\n']
+        }
     }
 
-    // Generate factory and instance types
-    let factory_name = format!("{}Factory", selected_world.to_upper_camel_case());
-    let instance_name = format!("{}Instance", selected_world.to_upper_camel_case());
-    let factory_name_str = factory_name.as_str();
-    let instance_name_str = instance_name.as_str();
+    // Create GoImports first so we can pass it to generate_imports
+    let go_imports = GoImports::new();
 
-    quote_in! { context.out =>
-        type $factory_name_str struct {
-            runtime wazero.Runtime
-            module  wazero.CompiledModule
-        }
-        $['\n']
-        type $instance_name_str struct {
-            module api.Module
-        }
-        $['\n']
+    // Generate imports using the library function (this generates interface definitions and import chains)
+    let import_result = generate_imports_with_chains(
+        &mut context,
+        &bindgen.resolve,
+        &world.name,
+        &world.imports,
+        &go_imports,
+    )
+    .context("Failed to generate imports")?;
+
+    let imported_interfaces = import_result.interface_params;
+    let import_chains = import_result.import_chains;
+
+    // Generate factory and instance types using the library
+    let factory_config = FactoryConfig {
+        world_name: &selected_world,
+        go_imports: &go_imports,
+        interface_params: imported_interfaces,
+        import_chains,
+        wasm_var_name,
     };
 
-    // Process imports (guest imports from host)
-    for (_name, import) in world.imports.iter() {
-        match import {
-            WorldItem::Interface { .. } => {
-                // TODO: Generate interface imports
-                quote_in! { context.out =>
-                    // TODO: Interface import
-                    $['\n']
-                };
-            }
-            WorldItem::Function(func) => {
-                // Generate import function
-                let _func_name = func.name.to_upper_camel_case();
+    let factory_generator = FactoryGenerator::new(&mut context, factory_config);
+    factory_generator
+        .generate()
+        .context("Failed to generate factory")?;
 
-                // TODO: Process function parameters and results
-                quote_in! { context.out =>
-                    // Import function: $(func.name.as_str())
-                    // TODO: Generate import binding
-                    $['\n']
-                };
-            }
-            WorldItem::Type(type_id) => {
-                // TODO: Generate type definition
-                let type_name = bindgen
-                    .resolve
-                    .types
-                    .get(*type_id)
-                    .and_then(|t| t.name.as_deref())
-                    .unwrap_or("anonymous");
-                quote_in! { context.out =>
-                    // Type: $type_name
-                    // TODO: Generate type binding
-                    $['\n']
-                };
-            }
-        }
-    }
-
-    // Process exports (guest exports to host)
-    for (_name, export) in world.exports.iter() {
-        match export {
-            WorldItem::Interface { .. } => {
-                // TODO: Generate interface exports
-                quote_in! { context.out =>
-                    // TODO: Interface export
-                    $['\n']
-                };
-            }
-            WorldItem::Function(func) => {
-                // Generate export function
-                let func_name = func.name.to_upper_camel_case();
-
-                // Create a simplified function context
-                let result = func
-                    .result
-                    .as_ref()
-                    .map(|t| resolve_type(t, &bindgen.resolve))
-                    .map(GoResult::Anon)
-                    .unwrap_or(GoResult::Empty);
-
-                // TODO: Use the instruction handler system properly
-                let result_str = format_result(&result);
-                quote_in! { context.out =>
-                    func (i *$instance_name_str) $func_name(ctx context.Context) $result_str {
-                        // TODO: Generate proper function body using instruction handlers
-                        panic("not implemented")
-                    }
-                    $['\n']
-                };
-            }
-            WorldItem::Type(type_id) => {
-                // TODO: Generate type definition
-                let type_name = bindgen
-                    .resolve
-                    .types
-                    .get(*type_id)
-                    .and_then(|t| t.name.as_deref())
-                    .unwrap_or("anonymous");
-                quote_in! { context.out =>
-                    // Type: $type_name
-                    // TODO: Generate type binding
-                    $['\n']
-                };
-            }
-        }
-    }
-
-    // Generate factory constructor
-    quote_in! { context.out =>
-        func New$factory_name_str(ctx context.Context) (*$factory_name_str, error) {
-            runtime := wazero.NewRuntime(ctx)
-            module, err := runtime.CompileModule(ctx, rawWasm)
-            if err != nil {
-                return nil, err
-            }
-            return &$factory_name_str{
-                runtime: runtime,
-                module:  module,
-            }, nil
-        }
-        $['\n']
-        func (f *$factory_name_str) Instantiate(ctx context.Context) (*$instance_name_str, error) {
-            module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig())
-            if err != nil {
-                return nil, err
-            }
-            return &$instance_name_str{module: module}, nil
-        }
-        $['\n']
-        func (f *$factory_name_str) Close(ctx context.Context) error {
-            return f.runtime.Close(ctx)
-        }
-        $['\n']
-        func (i *$instance_name_str) Close(ctx context.Context) error {
-            return i.module.Close(ctx)
-        }
-    };
+    // TODO: Process exports (guest exports to host)
+    // This requires implementing the export generation in gravity-codegen
 
     // Format and write output
     let mut writer = genco::fmt::FmtWriter::new(String::new());
@@ -268,86 +180,4 @@ fn main() -> Result<ExitCode> {
     }
 
     Ok(ExitCode::SUCCESS)
-}
-
-// TODO: Move these helper functions to appropriate crates
-fn resolve_type(typ: &Type, resolve: &Resolve) -> GoType {
-    match typ {
-        Type::Bool => GoType::Bool,
-        Type::U8 => GoType::Uint8,
-        Type::U16 => GoType::Uint16,
-        Type::U32 => GoType::Uint32,
-        Type::U64 => GoType::Uint64,
-        Type::S8 => GoType::Int8,
-        Type::S16 => GoType::Int16,
-        Type::S32 => GoType::Int32,
-        Type::S64 => GoType::Int64,
-        Type::F32 => GoType::Float32,
-        Type::F64 => GoType::Float64,
-        Type::String => GoType::String,
-        Type::Char => GoType::Uint32, // Char is represented as uint32
-        Type::ErrorContext => GoType::Interface, // TODO: Handle ErrorContext properly
-        Type::Id(id) => {
-            let typedef = resolve.types.get(*id).unwrap();
-            match &typedef.kind {
-                TypeDefKind::List(inner) => GoType::Slice(Box::new(resolve_type(inner, resolve))),
-                TypeDefKind::Option(inner) => {
-                    GoType::ValueOrOk(Box::new(resolve_type(inner, resolve)))
-                }
-                TypeDefKind::Result(result) => {
-                    match (&result.ok, &result.err) {
-                        (Some(ok), None) => GoType::ValueOrOk(Box::new(resolve_type(ok, resolve))),
-                        (None, Some(err)) => {
-                            GoType::ValueOrError(Box::new(resolve_type(err, resolve)))
-                        }
-                        _ => GoType::Interface, // TODO: Handle other result cases
-                    }
-                }
-                TypeDefKind::Variant(_) => GoType::Interface,
-                TypeDefKind::Enum(_) => GoType::Uint32, // Enums are represented as integers
-                TypeDefKind::Record(_) | TypeDefKind::Flags(_) | TypeDefKind::Tuple(_) => {
-                    GoType::UserDefined(
-                        typedef
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| "Anonymous".to_string()),
-                    )
-                }
-                TypeDefKind::Type(t) => resolve_type(t, resolve),
-                _ => GoType::Interface,
-            }
-        }
-    }
-}
-
-fn format_result(result: &GoResult) -> String {
-    match result {
-        GoResult::Empty => String::new(),
-        GoResult::Anon(typ) => format_type(typ),
-    }
-}
-
-fn format_type(typ: &GoType) -> String {
-    match typ {
-        GoType::Bool => "bool".to_string(),
-        GoType::Uint8 => "uint8".to_string(),
-        GoType::Uint16 => "uint16".to_string(),
-        GoType::Uint32 => "uint32".to_string(),
-        GoType::Uint64 => "uint64".to_string(),
-        GoType::Int8 => "int8".to_string(),
-        GoType::Int16 => "int16".to_string(),
-        GoType::Int32 => "int32".to_string(),
-        GoType::Int64 => "int64".to_string(),
-        GoType::Float32 => "float32".to_string(),
-        GoType::Float64 => "float64".to_string(),
-        GoType::String => "string".to_string(),
-        GoType::Error => "error".to_string(),
-        GoType::Interface => "interface{}".to_string(),
-        GoType::Pointer(inner) => format!("*{}", format_type(inner)),
-        GoType::ValueOrOk(inner) => format!("({}, bool)", format_type(inner)),
-        GoType::ValueOrError(inner) => format!("({}, error)", format_type(inner)),
-        GoType::Slice(inner) => format!("[]{}", format_type(inner)),
-        GoType::UserDefined(name) => name.to_upper_camel_case(),
-        GoType::Nothing => "".to_string(),
-    }
 }

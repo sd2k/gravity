@@ -363,6 +363,7 @@ dependencies = [
  "gravity-go",
  "gravity-wit",
  "heck",
+ "indexmap",
  "pretty_assertions",
  "wit-bindgen-core",
  "wit-component",
