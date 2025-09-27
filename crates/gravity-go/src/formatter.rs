@@ -4,13 +4,13 @@ use genco::lang::Go;
 use genco::prelude::*;
 use genco::tokens::{static_literal, ItemStr};
 
-impl genco::prelude::FormatInto<Go> for GoType {
+impl FormatInto<Go> for GoType {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         (&self).format_into(tokens)
     }
 }
 
-impl genco::prelude::FormatInto<Go> for &GoType {
+impl FormatInto<Go> for &GoType {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         match self {
             GoType::Bool => tokens.append(static_literal("bool")),
@@ -56,13 +56,13 @@ impl genco::prelude::FormatInto<Go> for &GoType {
     }
 }
 
-impl genco::prelude::FormatInto<Go> for GoResult {
+impl FormatInto<Go> for GoResult {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         (&self).format_into(tokens)
     }
 }
 
-impl genco::prelude::FormatInto<Go> for &GoResult {
+impl FormatInto<Go> for &GoResult {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         match &self {
             GoResult::Anon(typ @ GoType::ValueOrError(_) | typ @ GoType::ValueOrOk(_)) => {
@@ -76,7 +76,7 @@ impl genco::prelude::FormatInto<Go> for &GoResult {
 }
 
 // Implement genco's FormatInto for Operand so it can be used in quote! macros
-impl genco::prelude::FormatInto<Go> for &Operand {
+impl FormatInto<Go> for &Operand {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         match self {
             Operand::Literal(val) => tokens.append(ItemStr::from(val)),
@@ -91,13 +91,13 @@ impl genco::prelude::FormatInto<Go> for &Operand {
     }
 }
 
-impl genco::prelude::FormatInto<Go> for Operand {
+impl FormatInto<Go> for Operand {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         (&self).format_into(tokens)
     }
 }
 
-impl genco::prelude::FormatInto<Go> for &mut Operand {
+impl FormatInto<Go> for &mut Operand {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         let op: &Operand = self;
         op.format_into(tokens)

@@ -4,8 +4,10 @@ use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, Command};
 use genco::prelude::*;
 use gravity_codegen::{
-    generate_imports_with_chains, imports::GoImports, FactoryConfig, FactoryGenerator,
-    GenerationContext,
+    exports::{ExportConfig, ExportGenerator},
+    generate_imports_with_chains,
+    imports::GoImports,
+    FactoryConfig, FactoryGenerator, GenerationContext, TypeGenerator,
 };
 use gravity_go::{embed, Go, GoIdentifier};
 
@@ -57,6 +59,12 @@ fn main() -> Result<ExitCode> {
         .context("File should be a valid WebAssembly module")?;
 
     // Get the world
+    eprintln!("Looking for world: {}", selected_world);
+    eprintln!("Available worlds:");
+    for (_, world) in bindgen.resolve.worlds.iter() {
+        eprintln!("  - {}", world.name);
+    }
+
     let world_id = bindgen
         .resolve
         .worlds
@@ -65,16 +73,19 @@ fn main() -> Result<ExitCode> {
         .map(|(id, _)| id)
         .or_else(|| {
             // If the requested world is not found, try to find any world
-            eprintln!("World '{}' not found. Available worlds:", selected_world);
-            for (_, world) in bindgen.resolve.worlds.iter() {
-                eprintln!("  - {}", world.name);
-            }
+            eprintln!(
+                "World '{}' not found. Using first available world.",
+                selected_world
+            );
             // Use the first available world if the requested one doesn't exist
             bindgen.resolve.worlds.iter().next().map(|(id, _)| id)
         })
         .ok_or_else(|| anyhow::anyhow!("No worlds found in the WebAssembly component"))?;
 
     let world = bindgen.resolve.worlds.get(world_id).unwrap();
+    eprintln!("Using world: {}", world.name);
+    eprintln!("World has {} imports", world.imports.len());
+    eprintln!("World has {} exports", world.exports.len());
 
     // Create generation context
     let mut context = GenerationContext::new();
@@ -129,6 +140,12 @@ fn main() -> Result<ExitCode> {
     let imported_interfaces = import_result.interface_params;
     let import_chains = import_result.import_chains;
 
+    // Generate types (records, variants, enums, etc.)
+    let type_generator = TypeGenerator::new(&mut context, &bindgen.resolve);
+    type_generator
+        .generate_world_types(&world.exports, &world.imports)
+        .context("Failed to generate types")?;
+
     // Generate factory and instance types using the library
     let factory_config = FactoryConfig {
         world_name: &selected_world,
@@ -139,12 +156,31 @@ fn main() -> Result<ExitCode> {
     };
 
     let factory_generator = FactoryGenerator::new(&mut context, factory_config);
-    factory_generator
+    let instance_name = factory_generator
         .generate()
         .context("Failed to generate factory")?;
 
-    // TODO: Process exports (guest exports to host)
-    // This requires implementing the export generation in gravity-codegen
+    // Generate exports (guest exports to host)
+    eprintln!("DEBUG: world.exports.len() = {}", world.exports.len());
+    for (key, item) in world.exports.iter() {
+        eprintln!(
+            "DEBUG: Export key: {:?}, item: {:?}",
+            key,
+            std::mem::discriminant(item)
+        );
+    }
+    if !world.exports.is_empty() {
+        let export_config = ExportConfig {
+            world_name: &selected_world,
+            instance_name: &instance_name,
+            go_imports: &go_imports,
+        };
+
+        let export_generator = ExportGenerator::new(&mut context, export_config, &bindgen.resolve);
+        export_generator
+            .generate(&world.exports)
+            .context("Failed to generate exports")?;
+    }
 
     // Format and write output
     let mut writer = genco::fmt::FmtWriter::new(String::new());

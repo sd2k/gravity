@@ -1,8 +1,10 @@
 pub mod bindings;
 pub mod context;
+pub mod exports;
 pub mod factory;
 pub mod imports;
 pub mod instructions;
+pub mod types;
 
 use gravity_go::GoType;
 use wit_bindgen_core::wit_parser::{Resolve, Type, TypeDefKind};
@@ -12,6 +14,7 @@ pub use context::GenerationContext;
 pub use factory::{FactoryConfig, FactoryGenerator};
 pub use imports::{generate_imports_with_chains, ImportResult};
 pub use instructions::{handle_instruction, InstructionHandler};
+pub use types::TypeGenerator;
 
 /// Resolves a WIT type to a Go type.
 pub fn resolve_type(typ: &Type, resolve: &Resolve) -> anyhow::Result<GoType> {
@@ -39,12 +42,22 @@ pub fn resolve_type(typ: &Type, resolve: &Resolve) -> anyhow::Result<GoType> {
                 }
                 TypeDefKind::Result(result) => match (&result.ok, &result.err) {
                     (Some(ok), None) => GoType::ValueOrOk(Box::new(resolve_type(ok, resolve)?)),
-                    (None, Some(err)) => {
-                        GoType::ValueOrError(Box::new(resolve_type(err, resolve)?))
+                    (Some(ok), Some(_err)) => {
+                        // Result<T, E> is represented as (T, error) in Go
+                        GoType::ValueOrError(Box::new(resolve_type(ok, resolve)?))
                     }
-                    _ => GoType::Interface, // TODO: Handle other result cases
+                    (None, Some(_err)) => {
+                        // Result<(), E> is represented as error in Go
+                        GoType::Error
+                    }
+                    (None, None) => GoType::Nothing, // Result<(), ()> has no meaningful representation
                 },
-                TypeDefKind::Variant(_) => GoType::Interface,
+                TypeDefKind::Variant(_) => GoType::UserDefined(
+                    typedef
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "Anonymous".to_string()),
+                ),
                 TypeDefKind::Enum(_) => GoType::Uint32, // Enums are represented as integers
                 TypeDefKind::Record(_) | TypeDefKind::Flags(_) | TypeDefKind::Tuple(_) => {
                     GoType::UserDefined(

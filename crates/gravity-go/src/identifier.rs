@@ -35,14 +35,6 @@ impl<'a> GoIdentifier<'a> {
     }
 }
 
-// impl From<GoIdentifier<'_>> for String {
-//     fn from(value: GoIdentifier) -> Self {
-//         let mut tokens: Tokens<Go> = Tokens::new();
-//         value.format_into(&mut tokens);
-//         tokens.to_string().expect("to format correctly")
-//     }
-// }
-
 impl FormatInto<Go> for &GoIdentifier<'_> {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         match self {

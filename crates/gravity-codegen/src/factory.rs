@@ -26,8 +26,8 @@ impl<'a> FactoryGenerator<'a> {
         Self { context, config }
     }
 
-    /// Generate factory and instance types and methods
-    pub fn generate(mut self) -> Result<()> {
+    /// Generate factory and instance types and methods, returns the instance type identifier
+    pub fn generate(mut self) -> Result<GoIdentifier<'static>> {
         let world_name = self.config.world_name;
 
         // Create identifiers
@@ -53,7 +53,10 @@ impl<'a> FactoryGenerator<'a> {
         // Generate instance methods
         self.generate_instance_methods(&factory, &instance)?;
 
-        Ok(())
+        // Return the instance identifier for use in export generation
+        Ok(GoIdentifier::Public {
+            name: Box::leak(format!("{world_name}-instance").into_boxed_str()),
+        })
     }
 
     /// Generate factory and instance struct definitions
@@ -73,6 +76,34 @@ impl<'a> FactoryGenerator<'a> {
             $['\n']
             type $instance_name struct {
                 module $(&go_imports.wazero_api_module)
+            }
+            $['\n']
+        };
+
+        // Add writeString helper function for interface string returns
+        quote_in! { self.context.out =>
+            // writeString will put a Go string into the Wasm memory following the Component
+            // Model calling convetions, such as allocating memory with the realloc function
+            func writeString(
+                ctx $(&go_imports.context),
+                s string,
+                memory $(&go_imports.wazero_api_memory),
+                realloc api.Function,
+            ) (uint64, uint64, error) {
+                if len(s) == 0 {
+                    return 1, 0, nil
+                }
+
+                results, err := realloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+                if err != nil {
+                    return 1, 0, err
+                }
+                ptr := results[0]
+                ok := memory.Write(uint32(ptr), []byte(s))
+                if !ok {
+                    return 1, 0, err
+                }
+                return uint64(ptr), uint64(len(s)), nil
             }
             $['\n']
         };

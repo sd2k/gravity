@@ -11,6 +11,7 @@ use wit_bindgen_core::wit_parser::{Function, InterfaceId, Resolve, WorldItem, Wo
 pub struct GoImports {
     pub context: Import,
     pub errors: Import,
+    pub fmt: Import,
     pub wazero_runtime: Import,
     pub wazero_new_runtime: Import,
     pub wazero_new_module_config: Import,
@@ -24,6 +25,7 @@ impl GoImports {
         Self {
             context: genco::lang::go::import("context", "Context"),
             errors: genco::lang::go::import("errors", "New"),
+            fmt: genco::lang::go::import("fmt", "Printf"),
             wazero_runtime: genco::lang::go::import("github.com/tetratelabs/wazero", "Runtime"),
             wazero_new_runtime: genco::lang::go::import(
                 "github.com/tetratelabs/wazero",
@@ -256,31 +258,68 @@ impl<'a> ImportGenerator<'a> {
         interface_name: &str,
         output: &mut Tokens<Go>,
     ) -> Result<()> {
-        // For now, generate a simple stub
-        // TODO: Use wit_bindgen_core::abi::call to generate proper function body
-
         let func_name = &func.name;
         let param_name = interface_name; // This will be the interface parameter name
 
-        // Generate simple string handling for basic cases
-        // This is a simplified version - the real implementation needs wit_bindgen_core::abi::call
-        quote_in! { *output =>
-            $['\r']NewFunctionBuilder().
-            $['\r']WithFunc(func(
-                ctx $(self.go_imports.context.clone()),
-                mod $(self.go_imports.wazero_api_module.clone()),
-                arg0 uint32,
-                arg1 uint32,
-            ) {
-                buf, ok := mod.Memory().Read(arg0, arg1)
-                if !ok {
-                    panic($(self.go_imports.errors.clone())("failed to read bytes from memory"))
-                }
-                str := string(buf)
-                $(param_name).$(func_name.to_upper_camel_case())(ctx, str)
-            }).
-            $['\r']Export($(quoted(func_name))).
-        };
+        // Generate function signature based on parameters and return type
+        match (func.params.is_empty(), &func.result) {
+            // No parameters, no return value
+            (true, None) => {
+                quote_in! { *output =>
+                    $['\r']NewFunctionBuilder().
+                    $['\r']WithFunc(func(
+                        ctx $(self.go_imports.context.clone()),
+                        mod $(self.go_imports.wazero_api_module.clone()),
+                    ) {
+                        $(param_name).$(func_name.to_upper_camel_case())(ctx)
+                    }).
+                    $['\r']Export($(quoted(func_name))).
+                };
+            }
+            // No parameters, string return value
+            (true, Some(_)) => {
+                // Functions that return strings need a return pointer parameter
+                quote_in! { *output =>
+                    $['\r']NewFunctionBuilder().
+                    $['\r']WithFunc(func(
+                        ctx $(self.go_imports.context.clone()),
+                        mod $(self.go_imports.wazero_api_module.clone()),
+                        arg0 uint32,
+                    ) {
+                        value0 := $(param_name).$(func_name.to_upper_camel_case())(ctx)
+                        memory1 := mod.Memory()
+                        realloc1 := mod.ExportedFunction("cabi_realloc")
+                        ptr1, len1, err1 := writeString(ctx, value0, memory1, realloc1)
+                        if err1 != nil {
+                            panic(err1)
+                        }
+                        mod.Memory().WriteUint32Le(arg0+0, uint32(ptr1))
+                        mod.Memory().WriteUint32Le(arg0+4, uint32(len1))
+                    }).
+                    $['\r']Export($(quoted(func_name))).
+                };
+            }
+            // Has parameters, assume string parameter for now
+            (false, _) => {
+                quote_in! { *output =>
+                    $['\r']NewFunctionBuilder().
+                    $['\r']WithFunc(func(
+                        ctx $(self.go_imports.context.clone()),
+                        mod $(self.go_imports.wazero_api_module.clone()),
+                        arg0 uint32,
+                        arg1 uint32,
+                    ) {
+                        buf, ok := mod.Memory().Read(arg0, arg1)
+                        if !ok {
+                            panic($(self.go_imports.errors.clone())("failed to read bytes from memory"))
+                        }
+                        str := string(buf)
+                        $(param_name).$(func_name.to_upper_camel_case())(ctx, str)
+                    }).
+                    $['\r']Export($(quoted(func_name))).
+                };
+            }
+        }
 
         Ok(())
     }
