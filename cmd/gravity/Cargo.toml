@@ -16,6 +16,14 @@ rust-version = "1.88"
 name = "gravity"
 path = "src/main.rs"
 
+# This tests requires the example Wasm files to be built, so we don't
+# run it by default as part of `cargo test` (we set `test = false` below).
+# Run it explicitly using `cargo test --test cli`.
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+test = false
+
 [dependencies]
 clap = "=4.5.47"
 genco = "=0.18.1"
@@ -23,4 +31,5 @@ wit-bindgen-core = "=0.42.1"
 wit-component = "=0.230.0"
 
 [dev-dependencies]
+trycmd = "0.15.10"
 wit-bindgen = "=0.42.1"
