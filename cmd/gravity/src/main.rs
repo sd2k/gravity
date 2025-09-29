@@ -10,13 +10,13 @@ use genco::{
 use wit_bindgen_core::{
     abi::{AbiVariant, Bindgen, Instruction, LiftLower},
     wit_parser::{
-        Alignment, ArchitectureSize, Record, Resolve, Result_, SizeAlign, Type, TypeDef,
-        TypeDefKind, WorldItem,
+        Alignment, ArchitectureSize, Result_, SizeAlign, Type, TypeDef, TypeDefKind, WorldItem,
     },
 };
 
 use arcjet_gravity::{
-    go::{GoIdentifier, GoResult, GoType, Operand, comment, embed},
+    codegen::{Bindings, WasmData},
+    go::{GoIdentifier, GoResult, GoType, Operand, comment},
     resolve_type, resolve_wasm_type,
 };
 
@@ -868,9 +868,7 @@ impl Bindgen for Func {
                 let operand = &operands[0];
                 for field in record.fields.iter() {
                     let struct_field = GoIdentifier::public(&field.name);
-                    let var = GoIdentifier::Local {
-                        name: &format!("{}{tmp}", &field.name),
-                    };
+                    let var = &GoIdentifier::local(format!("{}{tmp}", &field.name));
                     quote_in! { self.body =>
                         $['\r']
                         $var := $operand.$struct_field
@@ -889,7 +887,7 @@ impl Bindgen for Func {
 
                 quote_in! {self.body =>
                     $['\r']
-                    $value := $(GoIdentifier::public(name)){
+                    $value := $(GoIdentifier::public(*name)){
                         $(for (name, op) in fields join ($['\r']) => $name: $op,)
                     }
                 };
@@ -1230,111 +1228,6 @@ impl Bindgen for Func {
     }
 }
 
-struct Bindings {
-    out: Tokens<Go>,
-}
-
-impl Bindings {
-    fn new() -> Self {
-        Self { out: Tokens::new() }
-    }
-
-    fn define_type(&mut self, typ_def: &TypeDef, resolve: &Resolve) {
-        let TypeDef { name, kind, .. } = typ_def;
-        match kind {
-            TypeDefKind::Record(Record { fields }) => {
-                let name = GoIdentifier::public(name.as_deref().expect("record to have a name"));
-                let fields = fields.iter().map(|field| {
-                    (
-                        GoIdentifier::public(&field.name),
-                        resolve_type(&field.ty, resolve),
-                    )
-                });
-
-                quote_in! { self.out =>
-                    $['\n']
-                    type $name struct {
-                        $(for (name, typ) in fields join ($['\r']) => $name $typ)
-                    }
-                }
-            }
-            TypeDefKind::Resource => todo!("TODO(#5): implement resources"),
-            TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
-            TypeDefKind::Flags(_) => todo!("TODO(#4):generate flags type definition"),
-            TypeDefKind::Tuple(_) => todo!("TODO(#4):generate tuple type definition"),
-            TypeDefKind::Variant(_) => {
-                // TODO(#4): Generate aliases if the variant name doesn't match the struct name
-            }
-            TypeDefKind::Enum(inner) => {
-                let name = name.clone().expect("enum to have a name");
-                let enum_type = GoIdentifier::private(&name);
-
-                let enum_interface = GoIdentifier::public(&name);
-
-                let enum_function = GoIdentifier::Private {
-                    name: &format!("is-{}", &name),
-                };
-
-                let variants = inner
-                    .cases
-                    .iter()
-                    .map(|variant| GoIdentifier::public(&variant.name));
-
-                quote_in! { self.out =>
-                    $['\n']
-                    type $enum_interface interface {
-                        $enum_function()
-                    }
-
-                    type $enum_type int
-
-                    func ($enum_type) $enum_function() {}
-
-                    const (
-                        $(for name in variants join ($['\r']) => $name $enum_type = iota)
-                    )
-                }
-            }
-            TypeDefKind::Option(_) => todo!("TODO(#4): generate option type definition"),
-            TypeDefKind::Result(_) => todo!("TODO(#4): generate result type definition"),
-            TypeDefKind::List(_) => todo!("TODO(#4): generate list type definition"),
-            TypeDefKind::Future(_) => todo!("TODO(#4): generate future type definition"),
-            TypeDefKind::Stream(_) => todo!("TODO(#4): generate stream type definition"),
-            TypeDefKind::Type(Type::Id(_)) => {
-                // TODO(#4):  Only skip this if we have already generated the type
-            }
-            TypeDefKind::Type(Type::Bool) => todo!("TODO(#4): generate bool type alias"),
-            TypeDefKind::Type(Type::U8) => todo!("TODO(#4): generate u8 type alias"),
-            TypeDefKind::Type(Type::U16) => todo!("TODO(#4): generate u16 type alias"),
-            TypeDefKind::Type(Type::U32) => todo!("TODO(#4): generate u32 type alias"),
-            TypeDefKind::Type(Type::U64) => todo!("TODO(#4): generate u64 type alias"),
-            TypeDefKind::Type(Type::S8) => todo!("TODO(#4): generate s8 type alias"),
-            TypeDefKind::Type(Type::S16) => todo!("TODO(#4): generate s16 type alias"),
-            TypeDefKind::Type(Type::S32) => todo!("TODO(#4): generate s32 type alias"),
-            TypeDefKind::Type(Type::S64) => todo!("TODO(#4): generate s64 type alias"),
-            TypeDefKind::Type(Type::F32) => todo!("TODO(#4): generate f32 type alias"),
-            TypeDefKind::Type(Type::F64) => todo!("TODO(#4): generate f64 type alias"),
-            TypeDefKind::Type(Type::Char) => todo!("TODO(#4): generate char type alias"),
-            TypeDefKind::Type(Type::String) => {
-                let name =
-                    GoIdentifier::public(name.as_deref().expect("string alias to have a name"));
-                // TODO(#4): We might want a Type Definition (newtype) instead of Type Alias here
-                quote_in! { self.out =>
-                    $['\n']
-                    type $name = string
-                }
-            }
-            TypeDefKind::Type(Type::ErrorContext) => {
-                todo!("TODO(#4): generate error context definition")
-            }
-            TypeDefKind::FixedSizeList(_, _) => {
-                todo!("TODO(#4): generate fixed size list definition")
-            }
-            TypeDefKind::Unknown => panic!("cannot generate Unknown type"),
-        }
-    }
-}
-
 // `wit_component::decode` uses `root` as an arbitrary name for the primary
 // world name, see
 // 1. https://github.com/bytecodealliance/wasm-tools/blob/585a0bdd8f49fc05d076effaa96e63d97f420578/crates/wit-component/src/decoding.rs#L144-L147
@@ -1394,18 +1287,10 @@ fn main() -> Result<ExitCode, ()> {
 
     let wasm_file = &format!("{}.wasm", selected_world.replace('-', "_"));
 
-    let raw_wasm = GoIdentifier::Private {
-        name: &format!("wasm-file-{selected_world}"),
-    };
-    let factory = GoIdentifier::Public {
-        name: &format!("{selected_world}-factory"),
-    };
-    let new_factory = GoIdentifier::Public {
-        name: &format!("new-{selected_world}-factory"),
-    };
-    let instance = GoIdentifier::Public {
-        name: &format!("{selected_world}-instance"),
-    };
+    let raw_wasm = &GoIdentifier::private(format!("wasm-file-{selected_world}"));
+    let factory = &GoIdentifier::public(format!("{selected_world}-factory"));
+    let new_factory = &GoIdentifier::public(&format!("new-{selected_world}-factory"));
+    let instance = &GoIdentifier::public(&format!("{selected_world}-instance"));
 
     let context = &go::import("context", "Context");
     let wazero_new_runtime = &go::import("github.com/tetratelabs/wazero", "NewRuntime");
@@ -1416,33 +1301,13 @@ fn main() -> Result<ExitCode, ()> {
     let wazero_api_memory = &go::import("github.com/tetratelabs/wazero/api", "Memory");
     let wazero_api_function = &go::import("github.com/tetratelabs/wazero/api", "Function");
 
-    let mut bindings = Bindings::new();
+    let mut bindings = Bindings::new(selected_world);
 
-    if inline_wasm {
-        let hex_rows = module
-            .chunks(16)
-            .map(|bytes| {
-                quote! {
-                    $(for b in bytes join ( ) => $(format!("0x{b:02x},")))
-                }
-            })
-            .collect::<Vec<Tokens<Go>>>();
-
-        // TODO(#16): Don't use the internal bindings.out field
-        quote_in! { bindings.out =>
-            var $raw_wasm = []byte{
-                $(for row in hex_rows join ($['\r']) => $row)
-            }
-        };
+    bindings.include_wasm(if inline_wasm {
+        WasmData::Inline(&module)
     } else {
-        // TODO(#16): Don't use the internal bindings.out field
-        quote_in! { bindings.out =>
-            import _ "embed"
-
-            $(embed(wasm_file))
-            var $raw_wasm []byte
-        }
-    }
+        WasmData::Embedded(wasm_file)
+    });
 
     for (_, world) in &bindgen.resolve.worlds {
         if world.name != *selected_world {
@@ -1514,9 +1379,8 @@ fn main() -> Result<ExitCode, ()> {
                             ) $result
                         };
                     }
-                    let iface_name = GoIdentifier::Public {
-                        name: &format!("i-{selected_world}-{interface_name}"),
-                    };
+                    let iface_name =
+                        GoIdentifier::public(format!("i-{selected_world}-{interface_name}"));
                     ifaces.push(interface_name.clone());
 
                     // TODO(#16): Don't use the internal bindings.out field
@@ -1604,9 +1468,9 @@ fn main() -> Result<ExitCode, ()> {
             $['\n']
             func $new_factory(
                 ctx $context,
-                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::Public {
-                    name: &format!("i-{selected_world}-{interface_name}"),
-                }),)
+                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::public (
+                    format!("i-{selected_world}-{interface_name}"),
+                )),)
             ) (*$factory, error) {
                 wazeroRuntime := $wazero_new_runtime(ctx)
 
@@ -1683,7 +1547,7 @@ fn main() -> Result<ExitCode, ()> {
         for world_item in world.exports.values() {
             match world_item {
                 WorldItem::Function(func) => {
-                    let mut params: Vec<(GoIdentifier<'_>, GoType)> =
+                    let mut params: Vec<(GoIdentifier, GoType)> =
                         Vec::with_capacity(func.params.len());
                     for (name, wit_type) in func.params.iter() {
                         let go_type = resolve_type(wit_type, &bindgen.resolve);
