@@ -1235,304 +1235,302 @@ fn main() -> Result<ExitCode, ()> {
         WasmData::Embedded(wasm_file)
     });
 
-    for (_, world) in &bindgen.resolve.worlds {
-        if world.name != *selected_world {
-            continue;
+    let (_, world) = bindgen
+        .resolve
+        .worlds
+        .iter()
+        .find(|(_, world)| world.name == *selected_world)
+        .expect("world {selected_world} not found");
+
+    // TODO(#16): Don't use the internal bindings.out field
+    quote_in! { bindings.out =>
+        $['\n']
+        type $factory struct {
+            runtime $wazero_runtime
+            module  $wazero_compiled_module
         }
+    };
 
-        // TODO(#16): Don't use the internal bindings.out field
-        quote_in! { bindings.out =>
-            $['\n']
-            type $factory struct {
-                runtime $wazero_runtime
-                module  $wazero_compiled_module
-            }
-        };
+    let mut import_fns: BTreeMap<String, Tokens<Go>> = BTreeMap::new();
+    let mut ifaces = Vec::new();
 
-        let mut import_fns: BTreeMap<String, Tokens<Go>> = BTreeMap::new();
-        let mut ifaces = Vec::new();
+    for (idx, world_item) in world.imports.values().enumerate() {
+        match world_item {
+            WorldItem::Interface { id, .. } => {
+                let iface = &bindgen.resolve.interfaces[*id];
+                let interface_name = iface.name.clone().expect("TODO");
+                let err = &format!("err{idx}");
 
-        for (idx, world_item) in world.imports.values().enumerate() {
-            match world_item {
-                WorldItem::Interface { id, .. } => {
-                    let iface = &bindgen.resolve.interfaces[*id];
-                    let interface_name = iface.name.clone().expect("TODO");
-                    let err = &format!("err{idx}");
+                // TOOD: Can this ever be empty?
+                let mut import_module_name = String::new();
+                if let Some(package) = iface.package {
+                    let pkg = &bindgen.resolve.packages[package];
+                    import_module_name = format!(
+                        "{}:{}/{}",
+                        pkg.name.namespace, pkg.name.name, interface_name
+                    )
+                }
 
-                    // TOOD: Can this ever be empty?
-                    let mut import_module_name = String::new();
-                    if let Some(package) = iface.package {
-                        let pkg = &bindgen.resolve.packages[package];
-                        import_module_name = format!(
-                            "{}:{}/{}",
-                            pkg.name.namespace, pkg.name.name, interface_name
-                        )
-                    }
-
-                    let import_chain = import_fns.entry(import_module_name.clone()).or_insert(
+                let import_chain = import_fns.entry(import_module_name.clone()).or_insert(
                         quote! {
                             _, $err := wazeroRuntime.NewHostModuleBuilder($(quoted(import_module_name))).
                         },
                     );
 
-                    for typ_id in iface.types.values() {
-                        let typ_def = bindgen.resolve.types.get(*typ_id).unwrap();
-                        bindings.define_type(typ_def, &bindgen.resolve);
-                    }
-
-                    let mut interface_funcs = Tokens::new();
-                    for func in iface.functions.values() {
-                        let mut params = Vec::with_capacity(func.params.len());
-                        for (name, wit_type) in func.params.iter() {
-                            let go_type = resolve_type(wit_type, &bindgen.resolve);
-                            params.push((GoIdentifier::local(name), go_type));
-                        }
-
-                        let result = match func.result {
-                            Some(wit_type) => {
-                                let go_type = resolve_type(&wit_type, &bindgen.resolve);
-                                GoResult::Anon(go_type)
-                            }
-                            None => GoResult::Empty,
-                        };
-
-                        let func_name = GoIdentifier::public(&func.name);
-                        quote_in! { interface_funcs =>
-                            $['\r']
-                            $(&func_name)(
-                                ctx $context,
-                                $(for (name, typ) in params join ($['\r']) => $(&name) $typ,)
-                            ) $result
-                        };
-                    }
-                    let iface_name =
-                        GoIdentifier::public(format!("i-{selected_world}-{interface_name}"));
-                    ifaces.push(interface_name.clone());
-
-                    // TODO(#16): Don't use the internal bindings.out field
-                    quote_in! { bindings.out =>
-                        $['\n']
-                        type $iface_name interface {
-                            $interface_funcs
-                        }
-                    };
-
-                    for func in iface.functions.values() {
-                        let mut sizes = SizeAlign::default();
-                        sizes.fill(&bindgen.resolve);
-
-                        let wasm_sig = bindgen
-                            .resolve
-                            .wasm_signature(AbiVariant::GuestImport, func);
-                        let result = if wasm_sig.results.is_empty() {
-                            GoResult::Empty
-                        } else {
-                            // TODO: Should this instead produce the results based on the wasm_sig?
-                            match &func.result {
-                                Some(Type::Bool) => GoResult::Anon(GoType::Uint32),
-                                Some(Type::Id(typ_id)) => {
-                                    let TypeDef { kind, .. } =
-                                        bindgen.resolve.types.get(*typ_id).unwrap();
-                                    let go_type = match kind {
-                                        TypeDefKind::Enum(_) => GoType::Uint32,
-                                        _ => todo!("handle Type::Id({typ_id:?})"),
-                                    };
-                                    GoResult::Anon(go_type)
-                                }
-                                Some(wit_type) => todo!("handle {wit_type:?}"),
-                                None => GoResult::Empty,
-                            }
-                        };
-
-                        let mut f = Func::import(interface_name.clone(), result, sizes);
-                        wit_bindgen_core::abi::call(
-                            &bindgen.resolve,
-                            AbiVariant::GuestImport,
-                            LiftLower::LiftArgsLowerResults,
-                            func,
-                            &mut f,
-                            // async is not currently supported
-                            false,
-                        );
-                        let name = &func.name;
-
-                        quote_in! { *import_chain =>
-                            $['\r']
-                            NewFunctionBuilder().
-                            $['\r']
-                            WithFunc(func(
-                                ctx $context,
-                                mod $wazero_api_module,
-                                $(for arg in f.args() join ($['\r']) => $arg uint32,)
-                            ) $(f.result()) {
-                                $f
-                            }).
-                            $['\r']
-                            Export($(quoted(name))).
-                        };
-                    }
-
-                    quote_in! { *import_chain =>
-                        $['\r']
-                        Instantiate(ctx)
-                        $['\r']
-                        if $err != nil {
-                            return nil, $err
-                        }
-                    };
-                }
-                WorldItem::Function(_) => (),
-                WorldItem::Type(id) => {
-                    let typ_def = bindgen.resolve.types.get(*id).unwrap();
+                for typ_id in iface.types.values() {
+                    let typ_def = bindgen.resolve.types.get(*typ_id).unwrap();
                     bindings.define_type(typ_def, &bindgen.resolve);
                 }
-            };
-        }
 
-        // TODO(#16): Don't use the internal bindings.out field
-        quote_in! { bindings.out =>
-            $['\n']
-            func $new_factory(
-                ctx $context,
-                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::public (
-                    format!("i-{selected_world}-{interface_name}"),
-                )),)
-            ) (*$factory, error) {
-                wazeroRuntime := $wazero_new_runtime(ctx)
-
-                $(for import_fn in import_fns.values() join ($['\r']) => $import_fn)
-
-                $(comment(&[
-                    "Compiling the module takes a LONG time, so we want to do it once and hold",
-                    "onto it with the Runtime"
-                ]))
-                module, err := wazeroRuntime.CompileModule(ctx, $raw_wasm)
-                if err != nil {
-                    return nil, err
-                }
-
-                return &$factory{wazeroRuntime, module}, nil
-            }
-
-            func (f *$factory) Instantiate(ctx $context) (*$instance, error) {
-                if module, err := f.runtime.InstantiateModule(ctx, f.module, $wazero_new_module_config()); err != nil {
-                    return nil, err
-                } else {
-                    return &$instance{module}, nil
-                }
-            }
-
-            func (f *$factory) Close(ctx $context) {
-                f.runtime.Close(ctx)
-            }
-        };
-
-        // TODO: Only apply helpers like `writeString` if they are needed
-        // TODO(#16): Don't use the internal bindings.out field
-        quote_in! { bindings.out =>
-            $['\n']
-            type $instance struct {
-                module $wazero_api_module
-            }
-
-            $(comment(&[
-                "writeString will put a Go string into the Wasm memory following the Component",
-                "Model calling convetions, such as allocating memory with the realloc function"
-            ]))
-            func writeString(
-                ctx $context,
-                s string,
-                memory $wazero_api_memory,
-                realloc $wazero_api_function,
-            ) (uint64, uint64, error) {
-                if len(s) == 0 {
-                    return 1, 0, nil
-                }
-
-                results, err := realloc.Call(ctx, 0, 0, 1, uint64(len(s)))
-                if err != nil {
-                    return 1, 0, err
-                }
-                ptr := results[0]
-                ok := memory.Write(uint32(ptr), []byte(s))
-                if !ok {
-                    return 1, 0, err
-                }
-                return uint64(ptr), uint64(len(s)), nil
-            }
-
-            func (i *$instance) Close(ctx $context) error {
-                if err := i.module.Close(ctx); err != nil {
-                    return err
-                }
-
-                return nil
-            }
-        };
-
-        for world_item in world.exports.values() {
-            match world_item {
-                WorldItem::Function(func) => {
-                    let mut params: Vec<(GoIdentifier, GoType)> =
-                        Vec::with_capacity(func.params.len());
+                let mut interface_funcs = Tokens::new();
+                for func in iface.functions.values() {
+                    let mut params = Vec::with_capacity(func.params.len());
                     for (name, wit_type) in func.params.iter() {
                         let go_type = resolve_type(wit_type, &bindgen.resolve);
-                        match go_type {
-                            // We can't represent this as an argument type so we unwrap the Some type
-                            // TODO: Figure out a better way to handle this
-                            GoType::ValueOrOk(typ) => {
-                                params.push((GoIdentifier::local(name), *typ))
-                            }
-                            typ => params.push((GoIdentifier::local(name), typ)),
-                        }
+                        params.push((GoIdentifier::local(name), go_type));
                     }
 
-                    let mut sizes = SizeAlign::default();
-                    sizes.fill(&bindgen.resolve);
-
-                    let result = match &func.result {
+                    let result = match func.result {
                         Some(wit_type) => {
-                            let go_type = resolve_type(wit_type, &bindgen.resolve);
+                            let go_type = resolve_type(&wit_type, &bindgen.resolve);
                             GoResult::Anon(go_type)
                         }
                         None => GoResult::Empty,
                     };
 
-                    let mut f = Func::export(result, sizes);
+                    let func_name = GoIdentifier::public(&func.name);
+                    quote_in! { interface_funcs =>
+                        $['\r']
+                        $(&func_name)(
+                            ctx $context,
+                            $(for (name, typ) in params join ($['\r']) => $(&name) $typ,)
+                        ) $result
+                    };
+                }
+                let iface_name =
+                    GoIdentifier::public(format!("i-{selected_world}-{interface_name}"));
+                ifaces.push(interface_name.clone());
+
+                // TODO(#16): Don't use the internal bindings.out field
+                quote_in! { bindings.out =>
+                    $['\n']
+                    type $iface_name interface {
+                        $interface_funcs
+                    }
+                };
+
+                for func in iface.functions.values() {
+                    let mut sizes = SizeAlign::default();
+                    sizes.fill(&bindgen.resolve);
+
+                    let wasm_sig = bindgen
+                        .resolve
+                        .wasm_signature(AbiVariant::GuestImport, func);
+                    let result = if wasm_sig.results.is_empty() {
+                        GoResult::Empty
+                    } else {
+                        // TODO: Should this instead produce the results based on the wasm_sig?
+                        match &func.result {
+                            Some(Type::Bool) => GoResult::Anon(GoType::Uint32),
+                            Some(Type::Id(typ_id)) => {
+                                let TypeDef { kind, .. } =
+                                    bindgen.resolve.types.get(*typ_id).unwrap();
+                                let go_type = match kind {
+                                    TypeDefKind::Enum(_) => GoType::Uint32,
+                                    _ => todo!("handle Type::Id({typ_id:?})"),
+                                };
+                                GoResult::Anon(go_type)
+                            }
+                            Some(wit_type) => todo!("handle {wit_type:?}"),
+                            None => GoResult::Empty,
+                        }
+                    };
+
+                    let mut f = Func::import(interface_name.clone(), result, sizes);
                     wit_bindgen_core::abi::call(
                         &bindgen.resolve,
-                        AbiVariant::GuestExport,
-                        LiftLower::LowerArgsLiftResults,
+                        AbiVariant::GuestImport,
+                        LiftLower::LiftArgsLowerResults,
                         func,
                         &mut f,
                         // async is not currently supported
                         false,
                     );
+                    let name = &func.name;
 
-                    let arg_assignments = f
-                        .args()
-                        .iter()
-                        .zip(params.iter())
-                        .map(|(arg, (param, _))| (arg, param))
-                        .collect::<Vec<(&String, &GoIdentifier)>>();
-
-                    let fn_name = &GoIdentifier::public(&func.name);
-                    // TODO(#16): Don't use the internal bindings.out field
-                    quote_in! { bindings.out =>
-                        $['\n']
-                        func (i *$instance) $fn_name(
-                            $['\r']
+                    quote_in! { *import_chain =>
+                        $['\r']
+                        NewFunctionBuilder().
+                        $['\r']
+                        WithFunc(func(
                             ctx $context,
-                            $(for (name, typ) in params.iter() join ($['\r']) => $name $typ,)
+                            mod $wazero_api_module,
+                            $(for arg in f.args() join ($['\r']) => $arg uint32,)
                         ) $(f.result()) {
-                            $(for (arg, param) in arg_assignments join ($['\r']) => $arg := $param)
                             $f
-                        }
+                        }).
+                        $['\r']
+                        Export($(quoted(name))).
                     };
                 }
-                WorldItem::Interface { .. } => (),
-                WorldItem::Type(_) => (),
+
+                quote_in! { *import_chain =>
+                    $['\r']
+                    Instantiate(ctx)
+                    $['\r']
+                    if $err != nil {
+                        return nil, $err
+                    }
+                };
             }
+            WorldItem::Function(_) => (),
+            WorldItem::Type(id) => {
+                let typ_def = bindgen.resolve.types.get(*id).unwrap();
+                bindings.define_type(typ_def, &bindgen.resolve);
+            }
+        };
+    }
+
+    // TODO(#16): Don't use the internal bindings.out field
+    quote_in! { bindings.out =>
+        $['\n']
+        func $new_factory(
+            ctx $context,
+            $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::public (
+                format!("i-{selected_world}-{interface_name}"),
+            )),)
+        ) (*$factory, error) {
+            wazeroRuntime := $wazero_new_runtime(ctx)
+
+            $(for import_fn in import_fns.values() join ($['\r']) => $import_fn)
+
+            $(comment(&[
+                "Compiling the module takes a LONG time, so we want to do it once and hold",
+                "onto it with the Runtime"
+            ]))
+            module, err := wazeroRuntime.CompileModule(ctx, $raw_wasm)
+            if err != nil {
+                return nil, err
+            }
+
+            return &$factory{wazeroRuntime, module}, nil
+        }
+
+        func (f *$factory) Instantiate(ctx $context) (*$instance, error) {
+            if module, err := f.runtime.InstantiateModule(ctx, f.module, $wazero_new_module_config()); err != nil {
+                return nil, err
+            } else {
+                return &$instance{module}, nil
+            }
+        }
+
+        func (f *$factory) Close(ctx $context) {
+            f.runtime.Close(ctx)
+        }
+    };
+
+    // TODO: Only apply helpers like `writeString` if they are needed
+    // TODO(#16): Don't use the internal bindings.out field
+    quote_in! { bindings.out =>
+        $['\n']
+        type $instance struct {
+            module $wazero_api_module
+        }
+
+        $(comment(&[
+            "writeString will put a Go string into the Wasm memory following the Component",
+            "Model calling convetions, such as allocating memory with the realloc function"
+        ]))
+        func writeString(
+            ctx $context,
+            s string,
+            memory $wazero_api_memory,
+            realloc $wazero_api_function,
+        ) (uint64, uint64, error) {
+            if len(s) == 0 {
+                return 1, 0, nil
+            }
+
+            results, err := realloc.Call(ctx, 0, 0, 1, uint64(len(s)))
+            if err != nil {
+                return 1, 0, err
+            }
+            ptr := results[0]
+            ok := memory.Write(uint32(ptr), []byte(s))
+            if !ok {
+                return 1, 0, err
+            }
+            return uint64(ptr), uint64(len(s)), nil
+        }
+
+        func (i *$instance) Close(ctx $context) error {
+            if err := i.module.Close(ctx); err != nil {
+                return err
+            }
+
+            return nil
+        }
+    };
+
+    for world_item in world.exports.values() {
+        match world_item {
+            WorldItem::Function(func) => {
+                let mut params: Vec<(GoIdentifier, GoType)> = Vec::with_capacity(func.params.len());
+                for (name, wit_type) in func.params.iter() {
+                    let go_type = resolve_type(wit_type, &bindgen.resolve);
+                    match go_type {
+                        // We can't represent this as an argument type so we unwrap the Some type
+                        // TODO: Figure out a better way to handle this
+                        GoType::ValueOrOk(typ) => params.push((GoIdentifier::local(name), *typ)),
+                        typ => params.push((GoIdentifier::local(name), typ)),
+                    }
+                }
+
+                let mut sizes = SizeAlign::default();
+                sizes.fill(&bindgen.resolve);
+
+                let result = match &func.result {
+                    Some(wit_type) => {
+                        let go_type = resolve_type(wit_type, &bindgen.resolve);
+                        GoResult::Anon(go_type)
+                    }
+                    None => GoResult::Empty,
+                };
+
+                let mut f = Func::export(result, sizes);
+                wit_bindgen_core::abi::call(
+                    &bindgen.resolve,
+                    AbiVariant::GuestExport,
+                    LiftLower::LowerArgsLiftResults,
+                    func,
+                    &mut f,
+                    // async is not currently supported
+                    false,
+                );
+
+                let arg_assignments = f
+                    .args()
+                    .iter()
+                    .zip(params.iter())
+                    .map(|(arg, (param, _))| (arg, param))
+                    .collect::<Vec<(&String, &GoIdentifier)>>();
+
+                let fn_name = &GoIdentifier::public(&func.name);
+                // TODO(#16): Don't use the internal bindings.out field
+                quote_in! { bindings.out =>
+                    $['\n']
+                    func (i *$instance) $fn_name(
+                        $['\r']
+                        ctx $context,
+                        $(for (name, typ) in params.iter() join ($['\r']) => $name $typ,)
+                    ) $(f.result()) {
+                        $(for (arg, param) in arg_assignments join ($['\r']) => $arg := $param)
+                        $f
+                    }
+                };
+            }
+            WorldItem::Interface { .. } => (),
+            WorldItem::Type(_) => (),
         }
     }
 
