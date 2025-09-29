@@ -8,14 +8,17 @@ use genco::{
     tokens::{FormatInto, quoted},
 };
 use wit_bindgen_core::{
-    abi::{AbiVariant, Bindgen, Instruction, LiftLower, WasmType},
+    abi::{AbiVariant, Bindgen, Instruction, LiftLower},
     wit_parser::{
         Alignment, ArchitectureSize, Record, Resolve, Result_, SizeAlign, Type, TypeDef,
         TypeDefKind, WorldItem,
     },
 };
 
-use arcjet_gravity::go::{GoIdentifier, GoResult, GoType, Operand, comment, embed};
+use arcjet_gravity::{
+    go::{GoIdentifier, GoResult, GoType, Operand, comment, embed},
+    resolve_type, resolve_wasm_type,
+};
 
 enum Direction {
     Export,
@@ -1150,100 +1153,6 @@ impl Bindgen for Func {
     ) -> bool {
         // Go slices are never directly in the Wasm Memory, so they are never "canonical"
         false
-    }
-}
-
-fn resolve_wasm_type(typ: &WasmType) -> GoType {
-    match typ {
-        WasmType::I32 => GoType::Uint32,
-        WasmType::I64 => GoType::Uint64,
-        WasmType::F32 => GoType::Float32,
-        WasmType::F64 => GoType::Float64,
-        WasmType::Pointer => GoType::Uint64,
-        WasmType::PointerOrI64 => GoType::Uint64,
-        WasmType::Length => GoType::Uint64,
-    }
-}
-
-fn resolve_type(typ: &Type, resolve: &Resolve) -> GoType {
-    match typ {
-        Type::Bool => GoType::Bool,
-        Type::U8 => GoType::Uint8,
-        Type::U16 => GoType::Uint16,
-        Type::U32 => GoType::Uint32,
-        Type::U64 => GoType::Uint64,
-        Type::S8 => GoType::Int8,
-        Type::S16 => GoType::Int16,
-        Type::S32 => GoType::Int32,
-        Type::S64 => GoType::Int64,
-        Type::F32 => GoType::Float32,
-        Type::F64 => GoType::Float64,
-        Type::Char => {
-            // Is this a Go "rune"?
-            todo!("TODO(#6): resolve char type")
-        }
-        Type::String => GoType::String,
-        Type::ErrorContext => todo!("TODO(#4): implement error context conversion"),
-        Type::Id(typ_id) => {
-            let TypeDef { name, kind, .. } = resolve.types.get(*typ_id).unwrap();
-            match kind {
-                TypeDefKind::Record(Record { .. }) => {
-                    let typ = name.clone().expect("record to have a name");
-                    GoType::UserDefined(typ)
-                }
-                TypeDefKind::Resource => todo!("TODO(#5): implement resources"),
-                TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
-                TypeDefKind::Flags(_) => todo!("TODO(#4): implement flag conversion"),
-                TypeDefKind::Tuple(_) => todo!("TODO(#4): implement tuple conversion"),
-                // Variants are handled as an empty interfaces in type signatures; however, that
-                // means they require runtime type reflection
-                TypeDefKind::Variant(_) => GoType::Interface,
-                TypeDefKind::Enum(_) => {
-                    let typ = name.clone().expect("enum to have a name");
-                    GoType::UserDefined(typ)
-                }
-                TypeDefKind::Option(value) => {
-                    GoType::ValueOrOk(Box::new(resolve_type(value, resolve)))
-                }
-                TypeDefKind::Result(Result_ {
-                    ok: Some(ok),
-                    err: Some(Type::String),
-                }) => GoType::ValueOrError(Box::new(resolve_type(ok, resolve))),
-                TypeDefKind::Result(Result_ {
-                    ok: Some(_),
-                    err: Some(_),
-                }) => {
-                    todo!("TODO(#4): implement remaining result conversion")
-                }
-                TypeDefKind::Result(Result_ {
-                    ok: Some(ok),
-                    err: None,
-                }) => resolve_type(ok, resolve),
-                TypeDefKind::Result(Result_ {
-                    ok: None,
-                    err: Some(Type::String),
-                }) => GoType::Error,
-                TypeDefKind::Result(Result_ {
-                    ok: None,
-                    err: Some(_),
-                }) => todo!("TODO(#4): implement remaining result conversion"),
-                TypeDefKind::Result(Result_ {
-                    ok: None,
-                    err: None,
-                }) => GoType::Nothing,
-                TypeDefKind::List(typ) => GoType::Slice(Box::new(resolve_type(typ, resolve))),
-                TypeDefKind::Future(_) => todo!("TODO(#4): implement future conversion"),
-                TypeDefKind::Stream(_) => todo!("TODO(#4): implement stream conversion"),
-                TypeDefKind::Type(_) => {
-                    let typ = name.clone().expect("type alias to have a name");
-                    GoType::UserDefined(typ)
-                }
-                TypeDefKind::FixedSizeList(_, _) => {
-                    todo!("TODO(#4): implement fixed size list conversion")
-                }
-                TypeDefKind::Unknown => todo!("TODO(#4): implement unknown conversion"),
-            }
-        }
     }
 }
 
