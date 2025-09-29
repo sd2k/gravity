@@ -1,3 +1,4 @@
+pub mod codegen;
 pub mod go;
 
 use crate::go::GoType;
