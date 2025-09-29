@@ -64,6 +64,7 @@ version = "0.0.2"
 dependencies = [
  "clap",
  "genco",
+ "indexmap",
  "trycmd",
  "wit-bindgen 0.42.1",
  "wit-bindgen-core",
