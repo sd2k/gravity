@@ -27,8 +27,10 @@ func NewInstructionsFactory(
 	if err != nil {
 		return nil, err
 	}
-
-	return &InstructionsFactory{wazeroRuntime, module}, nil
+	return &InstructionsFactory{
+		runtime: wazeroRuntime,
+		module: module,
+	}, nil
 }
 
 func (f *InstructionsFactory) Instantiate(ctx context.Context) (*InstructionsInstance, error) {
@@ -45,6 +47,14 @@ func (f *InstructionsFactory) Close(ctx context.Context) {
 
 type InstructionsInstance struct {
 	module api.Module
+}
+
+func (i *InstructionsInstance) Close(ctx context.Context) error {
+	if err := i.module.Close(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // writeString will put a Go string into the Wasm memory following the Component
@@ -69,14 +79,6 @@ func writeString(
 		return 1, 0, err
 	}
 	return uint64(ptr), uint64(len(s)), nil
-}
-
-func (i *InstructionsInstance) Close(ctx context.Context) error {
-	if err := i.module.Close(ctx); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (i *InstructionsInstance) S8Roundtrip(
