@@ -1,11 +1,11 @@
-use std::{collections::BTreeMap, fs, mem, path::Path, process::ExitCode, str::Chars};
+use std::{collections::BTreeMap, fs, mem, path::Path, process::ExitCode};
 
 use clap::{Arg, ArgAction, Command};
 use genco::{
     Tokens,
     lang::{Go, go},
     quote, quote_in,
-    tokens::{FormatInto, ItemStr, quoted, static_literal},
+    tokens::{FormatInto, quoted},
 };
 use wit_bindgen_core::{
     abi::{AbiVariant, Bindgen, Instruction, LiftLower, WasmType},
@@ -15,240 +15,8 @@ use wit_bindgen_core::{
     },
 };
 
-struct Embed<T>(T);
-impl<T> FormatInto<Go> for Embed<T>
-where
-    T: Into<ItemStr>,
-{
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        // TODO(#13): Submit patch to genco that will allow aliases for go imports
-        // tokens.register(go::import("embed", ""));
-        tokens.push();
-        tokens.append(static_literal("//go:embed"));
-        tokens.space();
-        tokens.append(self.0.into());
-    }
-}
+use arcjet_gravity::go::{GoIdentifier, GoResult, GoType, Operand, comment, embed};
 
-fn go_embed<T>(comment: T) -> Embed<T>
-where
-    T: Into<ItemStr>,
-{
-    Embed(comment)
-}
-
-// Format a comment where each line is preceeded by `//`.
-// Based on https://github.com/udoprog/genco/blob/1ec4869f458cf71d1d2ffef77fe051ea8058b391/src/lang/csharp/comment.rs
-struct Comment<T>(T);
-
-impl<T> FormatInto<Go> for Comment<T>
-where
-    T: IntoIterator,
-    T::Item: Into<ItemStr>,
-{
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        for line in self.0 {
-            tokens.push();
-            tokens.append(static_literal("//"));
-            tokens.space();
-            tokens.append(line.into());
-        }
-    }
-}
-
-fn comment<T>(comment: T) -> Comment<T>
-where
-    T: IntoIterator,
-    T::Item: Into<ItemStr>,
-{
-    Comment(comment)
-}
-
-#[derive(Debug, Clone)]
-enum GoType {
-    Bool,
-    Uint8,
-    Uint16,
-    Uint32,
-    Uint64,
-    Int8,
-    Int16,
-    Int32,
-    Int64,
-    Float32,
-    Float64,
-    String,
-    Error,
-    Interface,
-    // Pointer(Box<GoType>),
-    ValueOrOk(Box<GoType>),
-    ValueOrError(Box<GoType>),
-    Slice(Box<GoType>),
-    // MultiReturn(Vec<GoType>),
-    UserDefined(String),
-    Nothing,
-}
-
-impl GoType {
-    /// Returns true if this type needs post-return cleanup (cabi_post_* function)
-    ///
-    /// According to the Component Model Canonical ABI specification, cleanup is needed
-    /// for types that allocate memory in the guest's linear memory when being returned.
-    ///
-    /// Types that need cleanup:
-    /// - Strings: allocate memory for the string data
-    /// - Lists/Slices: allocate memory for the array data
-    /// - Types containing the above (recursively)
-    ///
-    /// Types that DON'T need cleanup:
-    /// - Primitives (bool, integers, floats): passed by value
-    /// - Enums: represented as integers
-    ///
-    /// Limitations:
-    /// - For UserDefined types (records, type aliases), we can't determine here if they
-    ///   contain strings/lists without the full type definition, so we're conservative
-    /// - A perfect implementation would recursively check record fields, but that would
-    ///   require passing the Resolve context here
-    fn needs_cleanup(&self) -> bool {
-        match self {
-            // Primitive types don't need cleanup
-            GoType::Bool
-            | GoType::Uint8
-            | GoType::Uint16
-            | GoType::Uint32
-            | GoType::Uint64
-            | GoType::Int8
-            | GoType::Int16
-            | GoType::Int32
-            | GoType::Int64
-            | GoType::Float32
-            | GoType::Float64 => false,
-
-            // String and slices allocate memory and need cleanup
-            GoType::String | GoType::Slice(_) => true,
-
-            // Complex types need cleanup if their inner types do
-            GoType::ValueOrOk(inner) => inner.needs_cleanup(),
-
-            // The inner type of `Err` is always a String so it requires cleanup
-            // TODO(#91): Store the error type to check both inner types.
-            GoType::ValueOrError(_) => true,
-
-            // Interfaces (variants) might need cleanup (conservative approach)
-            GoType::Interface => true,
-
-            // User-defined types (records, enums, type aliases) need cleanup if they
-            // contain strings or other allocated types. Since we don't have access to
-            // the type definition here, we must be conservative and assume they might.
-            //
-            // This means we might generate unnecessary cleanup calls for:
-            // - Enums (which are just integers)
-            // - Records containing only primitives
-            // - Type aliases to primitives
-            //
-            // TODO(#92): Improve this by either:
-            // 1. Passing the Resolve context to check actual type definitions
-            // 2. Tracking cleanup requirements during type resolution
-            // 3. Using a different representation that carries this information
-            GoType::UserDefined(_) => true,
-
-            // Error is actually Result<None, String> - strings need cleanup!
-            GoType::Error => true,
-
-            // Nothing represents no value, so no cleanup needed
-            GoType::Nothing => false,
-        }
-    }
-}
-
-impl FormatInto<Go> for &GoType {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        match self {
-            GoType::Bool => tokens.append(static_literal("bool")),
-            GoType::Uint8 => tokens.append(static_literal("uint8")),
-            GoType::Uint16 => tokens.append(static_literal("uint16")),
-            GoType::Uint32 => tokens.append(static_literal("uint32")),
-            GoType::Uint64 => tokens.append(static_literal("uint64")),
-            GoType::Int8 => tokens.append(static_literal("int8")),
-            GoType::Int16 => tokens.append(static_literal("int16")),
-            GoType::Int32 => tokens.append(static_literal("int32")),
-            GoType::Int64 => tokens.append(static_literal("int64")),
-            GoType::Float32 => tokens.append(static_literal("float32")),
-            GoType::Float64 => tokens.append(static_literal("float64")),
-            GoType::String => tokens.append(static_literal("string")),
-            GoType::Error => tokens.append(static_literal("error")),
-            GoType::Interface => tokens.append(static_literal("interface{}")),
-            GoType::ValueOrOk(value_typ) => {
-                value_typ.as_ref().format_into(tokens);
-                tokens.append(static_literal(","));
-                tokens.space();
-                tokens.append(static_literal("bool"))
-            }
-            GoType::ValueOrError(value_typ) => {
-                value_typ.as_ref().format_into(tokens);
-                tokens.append(static_literal(","));
-                tokens.space();
-                tokens.append(static_literal("error"))
-            }
-            GoType::Slice(typ) => {
-                tokens.append(static_literal("[]"));
-                typ.as_ref().format_into(tokens);
-            }
-            // GoType::MultiReturn(typs) => {
-            //     tokens.append(quote!($(for typ in typs join (, ) => $typ)))
-            // }
-            // GoType::Pointer(typ) => {
-            //     tokens.append(static_literal("*"));
-            //     typ.as_ref().format_into(tokens);
-            // }
-            GoType::UserDefined(name) => {
-                let id = GoIdentifier::Public { name };
-                id.format_into(tokens)
-            }
-            GoType::Nothing => (),
-        }
-    }
-}
-
-impl FormatInto<Go> for GoType {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        (&self).format_into(tokens)
-    }
-}
-
-#[derive(Clone)]
-enum GoResult {
-    Empty,
-    Anon(GoType),
-}
-
-impl GoResult {
-    /// Returns true if this result type needs post-return cleanup
-    fn needs_cleanup(&self) -> bool {
-        match self {
-            GoResult::Empty => false,
-            GoResult::Anon(typ) => typ.needs_cleanup(),
-        }
-    }
-}
-
-impl FormatInto<Go> for GoResult {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        (&self).format_into(tokens)
-    }
-}
-impl FormatInto<Go> for &GoResult {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        match &self {
-            GoResult::Anon(typ @ GoType::ValueOrError(_) | typ @ GoType::ValueOrOk(_)) => {
-                // Be cautious here as there are `(` and `)` surrounding the type
-                tokens.append(quote!(($typ)))
-            }
-            GoResult::Anon(typ) => typ.format_into(tokens),
-            GoResult::Empty => (),
-        }
-    }
-}
 enum Direction {
     Export,
     Import { interface_name: String },
@@ -263,64 +31,6 @@ struct Func {
     block_storage: Vec<Tokens<Go>>,
     blocks: Vec<(Tokens<Go>, Vec<Operand>)>,
     sizes: SizeAlign,
-}
-
-#[derive(Clone, Copy)]
-enum GoIdentifier<'a> {
-    Public { name: &'a str },
-    Private { name: &'a str },
-    Local { name: &'a str },
-}
-
-impl<'a> GoIdentifier<'a> {
-    fn chars(&self) -> Chars<'a> {
-        match self {
-            GoIdentifier::Public { name } => name.chars(),
-            GoIdentifier::Private { name } => name.chars(),
-            GoIdentifier::Local { name } => name.chars(),
-        }
-    }
-}
-
-impl From<GoIdentifier<'_>> for String {
-    fn from(value: GoIdentifier) -> Self {
-        let mut tokens: Tokens<Go> = Tokens::new();
-        value.format_into(&mut tokens);
-        tokens.to_string().expect("to format correctly")
-    }
-}
-
-impl FormatInto<Go> for &GoIdentifier<'_> {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        let mut chars = self.chars();
-
-        // TODO(#12): Check for invalid first character
-
-        if let GoIdentifier::Public { .. } = self {
-            // https://stackoverflow.com/a/38406885
-            match chars.next() {
-                Some(c) => tokens.append(ItemStr::from(c.to_uppercase().to_string())),
-                None => panic!("No function name"),
-            };
-        };
-
-        while let Some(c) = chars.next() {
-            match c {
-                ' ' | '-' | '_' => {
-                    if let Some(c) = chars.next() {
-                        tokens.append(ItemStr::from(c.to_uppercase().to_string()));
-                    }
-                }
-                _ => tokens.append(ItemStr::from(c.to_string())),
-            }
-        }
-    }
-}
-
-impl FormatInto<Go> for GoIdentifier<'_> {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        (&self).format_into(tokens)
-    }
 }
 
 impl Func {
@@ -376,34 +86,6 @@ impl Func {
 impl FormatInto<Go> for Func {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         self.body.format_into(tokens)
-    }
-}
-
-#[derive(Debug, Clone)]
-enum Operand {
-    Literal(String),
-    SingleValue(String),
-    MultiValue((String, String)),
-}
-
-impl FormatInto<Go> for &Operand {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        match self {
-            Operand::Literal(val) => tokens.append(ItemStr::from(val)),
-            Operand::SingleValue(val) => tokens.append(ItemStr::from(val)),
-            Operand::MultiValue((val1, val2)) => {
-                tokens.append(ItemStr::from(val1));
-                tokens.append(static_literal(","));
-                tokens.space();
-                tokens.append(ItemStr::from(val2));
-            }
-        }
-    }
-}
-impl FormatInto<Go> for &mut Operand {
-    fn format_into(self, tokens: &mut Tokens<Go>) {
-        let op: &Operand = self;
-        op.format_into(tokens)
     }
 }
 
@@ -846,7 +528,7 @@ impl Bindgen for Func {
                 }
             }
             Instruction::CallInterface { func, .. } => {
-                let ident = GoIdentifier::Public { name: &func.name };
+                let ident = GoIdentifier::public(&func.name);
                 let tmp = self.tmp();
                 let args = quote!($(for op in operands.iter() join (, ) => $op));
                 let returns = match &func.result {
@@ -859,9 +541,7 @@ impl Bindgen for Func {
                 match &self.direction {
                     Direction::Export { .. } => todo!("TODO(#10): handle export direction"),
                     Direction::Import { interface_name, .. } => {
-                        let iface = GoIdentifier::Local {
-                            name: interface_name,
-                        };
+                        let iface = GoIdentifier::local(interface_name);
                         quote_in! { self.body =>
                             $['\r']
                             $(match returns {
@@ -1174,7 +854,7 @@ impl Bindgen for Func {
                 let tmp = self.tmp();
                 let operand = &operands[0];
                 for field in record.fields.iter() {
-                    let struct_field = GoIdentifier::Public { name: &field.name };
+                    let struct_field = GoIdentifier::public(&field.name);
                     let var = GoIdentifier::Local {
                         name: &format!("{}{tmp}", &field.name),
                     };
@@ -1192,11 +872,11 @@ impl Bindgen for Func {
                     .fields
                     .iter()
                     .zip(operands)
-                    .map(|(field, op)| (GoIdentifier::Public { name: &field.name }, op));
+                    .map(|(field, op)| (GoIdentifier::public(&field.name), op));
 
                 quote_in! {self.body =>
                     $['\r']
-                    $value := $(GoIdentifier::Public { name }){
+                    $value := $(GoIdentifier::public(name)){
                         $(for (name, op) in fields join ($['\r']) => $name: $op,)
                     }
                 };
@@ -1319,7 +999,7 @@ impl Bindgen for Func {
                         };
                     }
 
-                    let name = GoIdentifier::Public { name: &case.name };
+                    let name = GoIdentifier::public(&case.name);
                     quote_in! { cases =>
                         $['\r']
                         case $name:
@@ -1356,7 +1036,7 @@ impl Bindgen for Func {
 
                 let mut cases: Tokens<Go> = Tokens::new();
                 for (i, case) in enum_.cases.iter().enumerate() {
-                    let case_name = GoIdentifier::Public { name: &case.name };
+                    let case_name = GoIdentifier::public(&case.name);
                     quote_in! { cases =>
                         $['\r']
                         case $case_name:
@@ -1580,12 +1260,10 @@ impl Bindings {
         let TypeDef { name, kind, .. } = typ_def;
         match kind {
             TypeDefKind::Record(Record { fields }) => {
-                let name = GoIdentifier::Public {
-                    name: &name.clone().expect("record to have a name"),
-                };
+                let name = GoIdentifier::public(name.as_deref().expect("record to have a name"));
                 let fields = fields.iter().map(|field| {
                     (
-                        GoIdentifier::Public { name: &field.name },
+                        GoIdentifier::public(&field.name),
                         resolve_type(&field.ty, resolve),
                     )
                 });
@@ -1606,17 +1284,18 @@ impl Bindings {
             }
             TypeDefKind::Enum(inner) => {
                 let name = name.clone().expect("enum to have a name");
-                let enum_type = GoIdentifier::Private { name: &name };
+                let enum_type = GoIdentifier::private(&name);
 
-                let enum_interface = GoIdentifier::Public { name: &name };
+                let enum_interface = GoIdentifier::public(&name);
 
                 let enum_function = GoIdentifier::Private {
                     name: &format!("is-{}", &name),
                 };
 
-                let variants = inner.cases.iter().map(|variant| GoIdentifier::Public {
-                    name: &variant.name,
-                });
+                let variants = inner
+                    .cases
+                    .iter()
+                    .map(|variant| GoIdentifier::public(&variant.name));
 
                 quote_in! { self.out =>
                     $['\n']
@@ -1654,9 +1333,8 @@ impl Bindings {
             TypeDefKind::Type(Type::F64) => todo!("TODO(#4): generate f64 type alias"),
             TypeDefKind::Type(Type::Char) => todo!("TODO(#4): generate char type alias"),
             TypeDefKind::Type(Type::String) => {
-                let name = GoIdentifier::Public {
-                    name: &name.clone().expect("string alias to have a name"),
-                };
+                let name =
+                    GoIdentifier::public(name.as_deref().expect("string alias to have a name"));
                 // TODO(#4): We might want a Type Definition (newtype) instead of Type Alias here
                 quote_in! { self.out =>
                     $['\n']
@@ -1778,7 +1456,7 @@ fn main() -> Result<ExitCode, ()> {
         quote_in! { bindings.out =>
             import _ "embed"
 
-            $(go_embed(wasm_file))
+            $(embed(wasm_file))
             var $raw_wasm []byte
         }
     }
@@ -1833,7 +1511,7 @@ fn main() -> Result<ExitCode, ()> {
                         let mut params = Vec::with_capacity(func.params.len());
                         for (name, wit_type) in func.params.iter() {
                             let go_type = resolve_type(wit_type, &bindgen.resolve);
-                            params.push((GoIdentifier::Local { name }, go_type));
+                            params.push((GoIdentifier::local(name), go_type));
                         }
 
                         let result = match func.result {
@@ -1844,7 +1522,7 @@ fn main() -> Result<ExitCode, ()> {
                             None => GoResult::Empty,
                         };
 
-                        let func_name = GoIdentifier::Public { name: &func.name };
+                        let func_name = GoIdentifier::public(&func.name);
                         quote_in! { interface_funcs =>
                             $['\r']
                             $(&func_name)(
@@ -1943,7 +1621,7 @@ fn main() -> Result<ExitCode, ()> {
             $['\n']
             func $new_factory(
                 ctx $context,
-                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::Local { name: interface_name }) $(GoIdentifier::Public {
+                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::Public {
                     name: &format!("i-{selected_world}-{interface_name}"),
                 }),)
             ) (*$factory, error) {
@@ -2030,9 +1708,9 @@ fn main() -> Result<ExitCode, ()> {
                             // We can't represent this as an argument type so we unwrap the Some type
                             // TODO: Figure out a better way to handle this
                             GoType::ValueOrOk(typ) => {
-                                params.push((GoIdentifier::Local { name }, *typ))
+                                params.push((GoIdentifier::local(name), *typ))
                             }
-                            typ => params.push((GoIdentifier::Local { name }, typ)),
+                            typ => params.push((GoIdentifier::local(name), typ)),
                         }
                     }
 
@@ -2065,7 +1743,7 @@ fn main() -> Result<ExitCode, ()> {
                         .map(|(arg, (param, _))| (arg, param))
                         .collect::<Vec<(&String, &GoIdentifier)>>();
 
-                    let fn_name = &GoIdentifier::Public { name: &func.name };
+                    let fn_name = &GoIdentifier::public(&func.name);
                     // TODO(#16): Don't use the internal bindings.out field
                     quote_in! { bindings.out =>
                         $['\n']
