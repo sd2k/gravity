@@ -5,7 +5,8 @@ use wit_bindgen_core::wit_parser::{Resolve, SizeAlign, World};
 
 use crate::{
     codegen::{
-        FactoryGenerator,
+        ExportGenerator, FactoryGenerator,
+        exports::ExportConfig,
         factory::FactoryConfig,
         imports::{ImportAnalyzer, ImportCodeGenerator},
         ir::AnalyzedImports,
@@ -48,8 +49,18 @@ impl<'a> Bindings<'a> {
         Wasm::new(&self.raw_wasm_var, wasm).format_into(&mut self.out)
     }
 
+    /// Generate the bindings.
+    ///
+    /// This generates the imports (interfaces, types, functions), the factory and instance
+    /// type, and the exports (functions).
+    pub fn generate(&mut self) {
+        let (imports, chains) = self.generate_imports();
+        self.generate_factory(&imports, chains);
+        self.generate_exports(&imports.instance_name);
+    }
+
     /// Generates the imports for the bindings.
-    pub fn generate_imports(&mut self) -> (AnalyzedImports, BTreeMap<String, Tokens<Go>>) {
+    fn generate_imports(&mut self) -> (AnalyzedImports, BTreeMap<String, Tokens<Go>>) {
         let analyzer = ImportAnalyzer::new(self.resolve, self.world);
         let analyzed = analyzer.analyze();
 
@@ -61,7 +72,7 @@ impl<'a> Bindings<'a> {
 
     /// Generates the factory and instantiate functions, including any
     /// required interfaces.
-    pub fn generate_factory(
+    fn generate_factory(
         &mut self,
         analyzed_imports: &AnalyzedImports,
         import_chains: BTreeMap<String, Tokens<Go>>,
@@ -72,5 +83,19 @@ impl<'a> Bindings<'a> {
             wasm_var_name: &self.raw_wasm_var,
         };
         FactoryGenerator::new(config).format_into(&mut self.out)
+    }
+
+    /// Generates all exports for the world.
+    ///
+    /// Note: for now this only generates functions; types and interfaces are
+    /// still TODO
+    fn generate_exports(&mut self, instance: &GoIdentifier) {
+        let config = ExportConfig {
+            instance,
+            world: self.world,
+            resolve: self.resolve,
+            sizes: self.sizes,
+        };
+        ExportGenerator::new(config).format_into(&mut self.out)
     }
 }
