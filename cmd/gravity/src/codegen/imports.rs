@@ -227,7 +227,19 @@ impl<'a> ImportAnalyzer<'a> {
             TypeDefKind::Future(_) => todo!("TODO(#4): generate future type definition"),
             TypeDefKind::Stream(_) => todo!("TODO(#4): generate stream type definition"),
             TypeDefKind::Flags(_) => todo!("TODO(#4):generate flags type definition"),
-            TypeDefKind::Tuple(_) => todo!("TODO(#4):generate tuple type definition"),
+            TypeDefKind::Tuple(tuple) => TypeDefinition::Record {
+                fields: tuple
+                    .types
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        (
+                            GoIdentifier::public(format!("f-{i}")),
+                            resolve_type(t, self.resolve),
+                        )
+                    })
+                    .collect(),
+            },
             TypeDefKind::Resource => todo!("TODO(#5): implement resources"),
             TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
             TypeDefKind::Unknown => panic!("cannot generate Unknown type"),
