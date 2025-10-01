@@ -725,7 +725,7 @@ checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 [[package]]
 name = "rv"
 version = "0.18.1"
-source = "git+https://github.com/sd2k/rv?branch=bump-rand-dependency#8309905835dd867cce2765e3dc151c54354e6dc0"
+source = "git+https://github.com/sd2k/rv?branch=bump-rand-dependency#ecc65506404da9d2def3f2b53a83c9de9f7c8401"
 dependencies = [
  "doc-comment",
  "itertools 0.13.0",
@@ -1273,43 +1273,3 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[patch.unused]]
-name = "argmin"
-version = "0.11.0"
-source = "git+https://github.com/argmin-rs/argmin?branch=main#c94c32adefd6c2525ce05806092ca868ec85fba4"
-
-[[patch.unused]]
-name = "argmin-math"
-version = "0.5.0"
-source = "git+https://github.com/argmin-rs/argmin?branch=main#c94c32adefd6c2525ce05806092ca868ec85fba4"
-
-[[patch.unused]]
-name = "cap-rand"
-version = "3.4.4"
-source = "git+https://github.com/sd2k/cap-std?branch=bump-rand#31f05b9705b947c6e375996f854d6dc8d6f968be"
-
-[[patch.unused]]
-name = "changepoint"
-version = "0.14.2"
-source = "git+https://github.com/sd2k/changepoint?branch=patched-deps-to-bump-rand#1f197a8aac1730a7c3a43fbafddacf739b275beb"
-
-[[patch.unused]]
-name = "statrs"
-version = "0.18.0"
-source = "git+https://github.com/RobertJacobsonCDC/statrs?branch=update_rand_to_09#245b98522e28a2701f0798c61d21c498a9847612"
-
-[[patch.unused]]
-name = "wasmtime"
-version = "38.0.0"
-source = "git+https://github.com/sd2k/wasmtime?branch=bump-rand#dcc8dd117c6d4c18a30afd3991ff1c7b84faa23e"
-
-[[patch.unused]]
-name = "wasmtime-wasi"
-version = "38.0.0"
-source = "git+https://github.com/sd2k/wasmtime?branch=bump-rand#dcc8dd117c6d4c18a30afd3991ff1c7b84faa23e"
-
-[[patch.unused]]
-name = "wasmtime-wasi-io"
-version = "38.0.0"
-source = "git+https://github.com/sd2k/wasmtime?branch=bump-rand#dcc8dd117c6d4c18a30afd3991ff1c7b84faa23e"
