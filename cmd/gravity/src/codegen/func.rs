@@ -1492,7 +1492,45 @@ impl Bindgen for Func<'_> {
                 todo!("implement instruction: {inst:?}")
             }
             Instruction::EnumLift { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::Malloc { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::Malloc {
+                realloc,
+                size,
+                align,
+            } => {
+                let tmp = self.tmp();
+                let ptr = &format!("ptr{tmp}");
+                let result = &format!("result{tmp}");
+                let err = &format!("err{tmp}");
+                let default = &format!("default{tmp}");
+                let size = size.size_wasm32();
+                let align = align.align_wasm32();
+
+                quote_in! { self.body =>
+                    $['\r']
+                    $result, $err := i.module.ExportedFunction($(quoted(*realloc))).Call(ctx, 0, 0, $align, $size)
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if $err != nil {
+                                var $default $(typ.as_ref())
+                                return $default, $err
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if $err != nil {
+                                return $err
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if $err != nil {
+                                panic($err)
+                            }
+                        }
+                    })
+                    $ptr := $result[0]
+                }
+                results.push(Operand::SingleValue(ptr.into()));
+            }
             Instruction::HandleLower { .. } | Instruction::HandleLift { .. } => {
                 todo!("implement resources: {inst:?}")
             }
