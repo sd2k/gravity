@@ -19,6 +19,7 @@ pub struct GoImports {
     pub wazero_api_encode_f32: Import,
     pub wazero_api_decode_f64: Import,
     pub wazero_api_encode_f64: Import,
+    pub reflect_value_of: Import,
 }
 
 impl Default for GoImports {
@@ -86,6 +87,7 @@ impl GoImports {
                 "github.com/tetratelabs/wazero/api",
                 "EncodeF64",
             ),
+            reflect_value_of: genco::lang::go::import("reflect", "ValueOf"),
         }
     }
 }
