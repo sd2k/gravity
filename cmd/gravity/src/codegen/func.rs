@@ -1,6 +1,6 @@
 use std::mem;
 
-use genco::prelude::*;
+use genco::{prelude::*, tokens::static_literal};
 use wit_bindgen_core::{
     abi::{Bindgen, Instruction},
     wit_parser::{Alignment, ArchitectureSize, Resolve, Result_, SizeAlign, Type, TypeDefKind},
@@ -516,7 +516,7 @@ impl Bindgen for Func<'_> {
                     }
                 };
 
-                results.push(Operand::MultiValue((value.into(), err.into())));
+                results.push(Operand::DoubleValue(value.into(), err.into()));
             }
             Instruction::ResultLift {
                 result:
@@ -606,10 +606,10 @@ impl Bindgen for Func<'_> {
                         results.push(Operand::SingleValue(err.into()));
                     }
                     GoType::ValueOrError(_) => {
-                        results.push(Operand::MultiValue((value.into(), err.into())));
+                        results.push(Operand::DoubleValue(value.into(), err.into()));
                     }
                     GoType::ValueOrOk(_) => {
-                        results.push(Operand::MultiValue((value.into(), ok.into())))
+                        results.push(Operand::DoubleValue(value.into(), ok.into()))
                     }
                     _ => todo!("TODO(#9): handle return type - {returns:?}"),
                 }
@@ -754,7 +754,10 @@ impl Bindgen for Func<'_> {
                     Operand::SingleValue(_) => panic!(
                         "impossible: expected Operand::MultiValue but got Operand::SingleValue"
                     ),
-                    Operand::MultiValue(bindings) => bindings,
+                    Operand::DoubleValue(ok, err) => (ok, err),
+                    Operand::MultiValue(_) => panic!(
+                        "impossible: expected Operand::DoubleValue but got Operand::MultiValue"
+                    ),
                 };
                 quote_in! { self.body =>
                     $['\r']
@@ -814,7 +817,7 @@ impl Bindgen for Func<'_> {
                     }
                 };
 
-                results.push(Operand::MultiValue((result.into(), ok.into())));
+                results.push(Operand::DoubleValue(result.into(), ok.into()));
             }
             Instruction::OptionLower {
                 results: result_types,
@@ -869,7 +872,12 @@ impl Bindgen for Func<'_> {
                             }
                         };
                     }
-                    Operand::MultiValue((value, ok)) => {
+                    Operand::MultiValue(_) => {
+                        panic!(
+                            "impossible: expected Operand::DoubleValue but got Operand::MultiValue"
+                        )
+                    }
+                    Operand::DoubleValue(value, ok) => {
                         quote_in! { self.body =>
                             $['\r']
                             if $ok {
@@ -915,7 +923,7 @@ impl Bindgen for Func<'_> {
                             $['\r']
                         };
                         match (&field_type, &op_clone) {
-                            (GoType::Pointer(inner_type), Operand::MultiValue((val, ok))) => {
+                            (GoType::Pointer(inner_type), Operand::DoubleValue(val, ok)) => {
                                 quote_in! { self.body =>
                                     $['\r']
                                 };
@@ -1484,8 +1492,73 @@ impl Bindgen for Func<'_> {
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
-            Instruction::TupleLower { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::TupleLift { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::TupleLower { tuple, .. } => {
+                let tmp = self.tmp();
+                let operand = &operands[0];
+                for (i, _) in tuple.types.iter().enumerate() {
+                    let field = GoIdentifier::public(format!("f-{i}"));
+                    let var = &GoIdentifier::local(format!("f-{tmp}-{i}"));
+                    quote_in! { self.body =>
+                        $['\r']
+                        $var := $operand.$field
+                    }
+                    results.push(Operand::SingleValue(var.into()));
+                }
+            }
+            Instruction::TupleLift { tuple, ty } => {
+                if tuple.types.len() != operands.len() {
+                    panic!(
+                        "impossible: expected {} operands but got {}",
+                        tuple.types.len(),
+                        operands.len()
+                    );
+                }
+                let tmp = self.tmp();
+                let value = &GoIdentifier::local(format!("value{tmp}"));
+
+                let mut ty_tokens = Tokens::new();
+                if let Some(ty) = resolve
+                    .types
+                    .get(ty.clone())
+                    .expect("failed to find tuple type definition")
+                    .name
+                    .as_ref()
+                {
+                    let ty_name = GoIdentifier::public(ty);
+                    ty_name.format_into(&mut ty_tokens);
+                } else {
+                    ty_tokens.append(static_literal("struct{"));
+                    if let Some((last, typs)) = tuple.types.split_last() {
+                        for (i, typ) in typs.iter().enumerate() {
+                            let go_type = resolve_type(typ, resolve);
+                            let field = GoIdentifier::public(format!("f-{i}"));
+                            field.format_into(&mut ty_tokens);
+                            ty_tokens.space();
+                            go_type.format_into(&mut ty_tokens);
+                            ty_tokens.append(static_literal(";"));
+                            ty_tokens.space();
+                        }
+                        let field = GoIdentifier::public(format!("f-{}", typs.len()));
+                        field.format_into(&mut ty_tokens);
+                        let go_type = resolve_type(last, resolve);
+                        ty_tokens.space();
+                        ty_tokens.append(go_type);
+                    }
+                    ty_tokens.append(static_literal("}"));
+                }
+                quote_in! { self.body =>
+                    $['\r']
+                    var $value $ty_tokens
+                }
+                for (i, (operand, _)) in operands.iter().zip(&tuple.types).enumerate() {
+                    let field = &GoIdentifier::public(format!("f-{i}"));
+                    quote_in! { self.body =>
+                        $['\r']
+                        $value.$field = $operand
+                    }
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::FlagsLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::FlagsLift { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::VariantLift { .. } => {
