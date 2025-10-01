@@ -50,12 +50,17 @@ func NewBasicFactory(
 		arg0 uint32,
 		arg1 uint32,
 	) {
+		// GetArg { nth: 0 }
+		// GetArg { nth: 1 }
+		// StringLift
 		buf0, ok0 := mod.Memory().Read(arg0, arg1)
 		if !ok0 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str0 := string(buf0)
+		// CallInterface { func: Function { name: "debug", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		logger.Debug(ctx, str0)
+		// Return { amt: 0, func: Function { name: "debug", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("debug").
 	NewFunctionBuilder().
@@ -65,12 +70,17 @@ func NewBasicFactory(
 		arg0 uint32,
 		arg1 uint32,
 	) {
+		// GetArg { nth: 0 }
+		// GetArg { nth: 1 }
+		// StringLift
 		buf0, ok0 := mod.Memory().Read(arg0, arg1)
 		if !ok0 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str0 := string(buf0)
+		// CallInterface { func: Function { name: "info", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		logger.Info(ctx, str0)
+		// Return { amt: 0, func: Function { name: "info", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("info").
 	NewFunctionBuilder().
@@ -80,12 +90,17 @@ func NewBasicFactory(
 		arg0 uint32,
 		arg1 uint32,
 	) {
+		// GetArg { nth: 0 }
+		// GetArg { nth: 1 }
+		// StringLift
 		buf0, ok0 := mod.Memory().Read(arg0, arg1)
 		if !ok0 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str0 := string(buf0)
+		// CallInterface { func: Function { name: "warn", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		logger.Warn(ctx, str0)
+		// Return { amt: 0, func: Function { name: "warn", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("warn").
 	NewFunctionBuilder().
@@ -95,12 +110,17 @@ func NewBasicFactory(
 		arg0 uint32,
 		arg1 uint32,
 	) {
+		// GetArg { nth: 0 }
+		// GetArg { nth: 1 }
+		// StringLift
 		buf0, ok0 := mod.Memory().Read(arg0, arg1)
 		if !ok0 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str0 := string(buf0)
+		// CallInterface { func: Function { name: "error", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		logger.Error(ctx, str0)
+		// Return { amt: 0, func: Function { name: "error", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("error").
 	Instantiate(ctx)
@@ -171,6 +191,7 @@ func writeString(
 func (i *BasicInstance) Hello(
 	ctx context.Context,
 ) (string, error) {
+	// CallWasm { name: "hello", sig: WasmSignature { params: [], results: [Pointer], indirect_params: false, retptr: true } }
 	raw0, err0 := i.module.ExportedFunction("hello").Call(ctx, )
 	if err0 != nil {
 		var default0 string
@@ -190,25 +211,30 @@ func (i *BasicInstance) Hello(
 	}()
 
 	results0 := raw0[0]
+	// I32Load8U { offset: 0 }
 	value1, ok1 := i.module.Memory().ReadByte(uint32(results0 + 0))
 	if !ok1 {
 		var default1 string
 		return default1, errors.New("failed to read byte from memory")
 	}
+	// ResultLift { result: Result_ { ok: Some(String), err: Some(String) }, ty: Id { idx: 0 } }
 	var value8 string
 	var err8 error
 	switch value1 {
 	case 0:
+		// PointerLoad { offset: ptrsz }
 		ptr2, ok2 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
 		if !ok2 {
 			var default2 string
 			return default2, errors.New("failed to read pointer from memory")
 		}
+		// LengthLoad { offset: (2*ptrsz) }
 		len3, ok3 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
 		if !ok3 {
 			var default3 string
 			return default3, errors.New("failed to read length from memory")
 		}
+		// StringLift
 		buf4, ok4 := i.module.Memory().Read(ptr2, len3)
 		if !ok4 {
 			var default4 string
@@ -217,16 +243,19 @@ func (i *BasicInstance) Hello(
 		str4 := string(buf4)
 		value8 = str4
 	case 1:
+		// PointerLoad { offset: ptrsz }
 		ptr5, ok5 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
 		if !ok5 {
 			var default5 string
 			return default5, errors.New("failed to read pointer from memory")
 		}
+		// LengthLoad { offset: (2*ptrsz) }
 		len6, ok6 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
 		if !ok6 {
 			var default6 string
 			return default6, errors.New("failed to read length from memory")
 		}
+		// StringLift
 		buf7, ok7 := i.module.Memory().Read(ptr5, len6)
 		if !ok7 {
 			var default7 string
@@ -237,12 +266,15 @@ func (i *BasicInstance) Hello(
 	default:
 		err8 = errors.New("invalid variant discriminant for expected")
 	}
+	// Flush { amt: 1 }
+	// Return { amt: 1, func: Function { name: "hello", kind: Freestanding, params: [], result: Some(Id(Id { idx: 0 })), docs: Docs { contents: None }, stability: Unknown } }
 	return value8, err8
 }
 
 func (i *BasicInstance) Primitive(
 	ctx context.Context,
 ) bool {
+	// CallWasm { name: "primitive", sig: WasmSignature { params: [], results: [I32], indirect_params: false, retptr: false } }
 	raw0, err0 := i.module.ExportedFunction("primitive").Call(ctx, )
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err0 != nil {
@@ -250,13 +282,16 @@ func (i *BasicInstance) Primitive(
 	}
 
 	results0 := raw0[0]
+	// BoolFromI32
 	value1 := results0 != 0
+	// Return { amt: 1, func: Function { name: "primitive", kind: Freestanding, params: [], result: Some(Bool), docs: Docs { contents: None }, stability: Unknown } }
 	return value1
 }
 
 func (i *BasicInstance) OptionalPrimitive(
 	ctx context.Context,
 ) (bool, bool) {
+	// CallWasm { name: "optional-primitive", sig: WasmSignature { params: [], results: [Pointer], indirect_params: false, retptr: true } }
 	raw0, err0 := i.module.ExportedFunction("optional-primitive").Call(ctx, )
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err0 != nil {
@@ -264,31 +299,38 @@ func (i *BasicInstance) OptionalPrimitive(
 	}
 
 	results0 := raw0[0]
+	// I32Load8U { offset: 0 }
 	value1, ok1 := i.module.Memory().ReadByte(uint32(results0 + 0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok1 {
 		panic(errors.New("failed to read byte from memory"))
 	}
+	// OptionLift { payload: Bool, ty: Id { idx: 1 } }
 	var result4 bool
 	var ok4 bool
 	if value1 == 0 {
 		ok4 = false
 	} else {
+		// I32Load8U { offset: 1 }
 		value2, ok2 := i.module.Memory().ReadByte(uint32(results0 + 1))
 		// The return type doesn't contain an error so we panic if one is encountered
 		if !ok2 {
 			panic(errors.New("failed to read byte from memory"))
 		}
+		// BoolFromI32
 		value3 := value2 != 0
 		ok4 = true
 		result4 = value3
 	}
+	// Flush { amt: 1 }
+	// Return { amt: 1, func: Function { name: "optional-primitive", kind: Freestanding, params: [], result: Some(Id(Id { idx: 1 })), docs: Docs { contents: None }, stability: Unknown } }
 	return result4, ok4
 }
 
 func (i *BasicInstance) ResultPrimitive(
 	ctx context.Context,
 ) (bool, error) {
+	// CallWasm { name: "result-primitive", sig: WasmSignature { params: [], results: [Pointer], indirect_params: false, retptr: true } }
 	raw0, err0 := i.module.ExportedFunction("result-primitive").Call(ctx, )
 	if err0 != nil {
 		var default0 bool
@@ -308,33 +350,40 @@ func (i *BasicInstance) ResultPrimitive(
 	}()
 
 	results0 := raw0[0]
+	// I32Load8U { offset: 0 }
 	value1, ok1 := i.module.Memory().ReadByte(uint32(results0 + 0))
 	if !ok1 {
 		var default1 bool
 		return default1, errors.New("failed to read byte from memory")
 	}
+	// ResultLift { result: Result_ { ok: Some(Bool), err: Some(String) }, ty: Id { idx: 2 } }
 	var value7 bool
 	var err7 error
 	switch value1 {
 	case 0:
+		// I32Load8U { offset: ptrsz }
 		value2, ok2 := i.module.Memory().ReadByte(uint32(results0 + 4))
 		if !ok2 {
 			var default2 bool
 			return default2, errors.New("failed to read byte from memory")
 		}
+		// BoolFromI32
 		value3 := value2 != 0
 		value7 = value3
 	case 1:
+		// PointerLoad { offset: ptrsz }
 		ptr4, ok4 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
 		if !ok4 {
 			var default4 bool
 			return default4, errors.New("failed to read pointer from memory")
 		}
+		// LengthLoad { offset: (2*ptrsz) }
 		len5, ok5 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
 		if !ok5 {
 			var default5 bool
 			return default5, errors.New("failed to read length from memory")
 		}
+		// StringLift
 		buf6, ok6 := i.module.Memory().Read(ptr4, len5)
 		if !ok6 {
 			var default6 bool
@@ -345,6 +394,8 @@ func (i *BasicInstance) ResultPrimitive(
 	default:
 		err7 = errors.New("invalid variant discriminant for expected")
 	}
+	// Flush { amt: 1 }
+	// Return { amt: 1, func: Function { name: "result-primitive", kind: Freestanding, params: [], result: Some(Id(Id { idx: 2 })), docs: Docs { contents: None }, stability: Unknown } }
 	return value7, err7
 }
 

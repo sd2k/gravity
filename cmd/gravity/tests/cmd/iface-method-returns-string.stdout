@@ -43,15 +43,21 @@ func NewExampleFactory(
 		mod api.Module,
 		arg0 uint32,
 	) {
+		// CallInterface { func: Function { name: "os", kind: Freestanding, params: [], result: Some(String), docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		value0 := runtime.Os(ctx, )
+		// GetArg { nth: 0 }
+		// StringLower { realloc: Some("cabi_realloc") }
 		memory1 := mod.Memory()
 		realloc1 := mod.ExportedFunction("cabi_realloc")
 		ptr1, len1, err1 := writeString(ctx, value0, memory1, realloc1)
 		if err1 != nil {
 			panic(err1)
 		}
-		mod.Memory().WriteUint32Le(arg0+4, uint32(len1))
-		mod.Memory().WriteUint32Le(arg0+0, uint32(ptr1))
+		// LengthStore { offset: ptrsz }
+		mod.Memory().WriteUint32Le(uint32(arg0+4), uint32(len1))
+		// PointerStore { offset: 0 }
+		mod.Memory().WriteUint32Le(uint32(arg0+0), uint32(ptr1))
+		// Return { amt: 0, func: Function { name: "os", kind: Freestanding, params: [], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("os").
 	NewFunctionBuilder().
@@ -60,15 +66,21 @@ func NewExampleFactory(
 		mod api.Module,
 		arg0 uint32,
 	) {
+		// CallInterface { func: Function { name: "arch", kind: Freestanding, params: [], result: Some(String), docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		value0 := runtime.Arch(ctx, )
+		// GetArg { nth: 0 }
+		// StringLower { realloc: Some("cabi_realloc") }
 		memory1 := mod.Memory()
 		realloc1 := mod.ExportedFunction("cabi_realloc")
 		ptr1, len1, err1 := writeString(ctx, value0, memory1, realloc1)
 		if err1 != nil {
 			panic(err1)
 		}
-		mod.Memory().WriteUint32Le(arg0+4, uint32(len1))
-		mod.Memory().WriteUint32Le(arg0+0, uint32(ptr1))
+		// LengthStore { offset: ptrsz }
+		mod.Memory().WriteUint32Le(uint32(arg0+4), uint32(len1))
+		// PointerStore { offset: 0 }
+		mod.Memory().WriteUint32Le(uint32(arg0+0), uint32(ptr1))
+		// Return { amt: 0, func: Function { name: "arch", kind: Freestanding, params: [], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("arch").
 	NewFunctionBuilder().
@@ -78,12 +90,17 @@ func NewExampleFactory(
 		arg0 uint32,
 		arg1 uint32,
 	) {
+		// GetArg { nth: 0 }
+		// GetArg { nth: 1 }
+		// StringLift
 		buf0, ok0 := mod.Memory().Read(arg0, arg1)
 		if !ok0 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str0 := string(buf0)
+		// CallInterface { func: Function { name: "puts", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		runtime.Puts(ctx, str0)
+		// Return { amt: 0, func: Function { name: "puts", kind: Freestanding, params: [("msg", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("puts").
 	Instantiate(ctx)
@@ -154,6 +171,7 @@ func writeString(
 func (i *ExampleInstance) Hello(
 	ctx context.Context,
 ) (string, error) {
+	// CallWasm { name: "hello", sig: WasmSignature { params: [], results: [Pointer], indirect_params: false, retptr: true } }
 	raw0, err0 := i.module.ExportedFunction("hello").Call(ctx, )
 	if err0 != nil {
 		var default0 string
@@ -173,25 +191,30 @@ func (i *ExampleInstance) Hello(
 	}()
 
 	results0 := raw0[0]
+	// I32Load8U { offset: 0 }
 	value1, ok1 := i.module.Memory().ReadByte(uint32(results0 + 0))
 	if !ok1 {
 		var default1 string
 		return default1, errors.New("failed to read byte from memory")
 	}
+	// ResultLift { result: Result_ { ok: Some(String), err: Some(String) }, ty: Id { idx: 0 } }
 	var value8 string
 	var err8 error
 	switch value1 {
 	case 0:
+		// PointerLoad { offset: ptrsz }
 		ptr2, ok2 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
 		if !ok2 {
 			var default2 string
 			return default2, errors.New("failed to read pointer from memory")
 		}
+		// LengthLoad { offset: (2*ptrsz) }
 		len3, ok3 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
 		if !ok3 {
 			var default3 string
 			return default3, errors.New("failed to read length from memory")
 		}
+		// StringLift
 		buf4, ok4 := i.module.Memory().Read(ptr2, len3)
 		if !ok4 {
 			var default4 string
@@ -200,16 +223,19 @@ func (i *ExampleInstance) Hello(
 		str4 := string(buf4)
 		value8 = str4
 	case 1:
+		// PointerLoad { offset: ptrsz }
 		ptr5, ok5 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
 		if !ok5 {
 			var default5 string
 			return default5, errors.New("failed to read pointer from memory")
 		}
+		// LengthLoad { offset: (2*ptrsz) }
 		len6, ok6 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
 		if !ok6 {
 			var default6 string
 			return default6, errors.New("failed to read length from memory")
 		}
+		// StringLift
 		buf7, ok7 := i.module.Memory().Read(ptr5, len6)
 		if !ok7 {
 			var default7 string
@@ -220,6 +246,8 @@ func (i *ExampleInstance) Hello(
 	default:
 		err8 = errors.New("invalid variant discriminant for expected")
 	}
+	// Flush { amt: 1 }
+	// Return { amt: 1, func: Function { name: "hello", kind: Freestanding, params: [], result: Some(Id(Id { idx: 0 })), docs: Docs { contents: None }, stability: Unknown } }
 	return value8, err8
 }
 
