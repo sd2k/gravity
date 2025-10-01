@@ -221,7 +221,9 @@ impl<'a> ImportAnalyzer<'a> {
             }
             TypeDefKind::Option(_) => todo!("TODO(#4): generate option type definition"),
             TypeDefKind::Result(_) => todo!("TODO(#4): generate result type definition"),
-            TypeDefKind::List(_) => todo!("TODO(#4): generate list type definition"),
+            TypeDefKind::List(ty) => TypeDefinition::Alias {
+                target: GoType::Slice(Box::new(resolve_type(ty, self.resolve))),
+            },
             TypeDefKind::Future(_) => todo!("TODO(#4): generate future type definition"),
             TypeDefKind::Stream(_) => todo!("TODO(#4): generate stream type definition"),
             TypeDefKind::Flags(_) => todo!("TODO(#4):generate flags type definition"),
