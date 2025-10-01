@@ -71,7 +71,7 @@ func TestNoOptionalPrimitiveCleanup(t *testing.T) {
 	}
 	defer ins.Close(t.Context())
 
-	actual, ok := ins.OptionalPrimitive(t.Context())
+	actual, ok := ins.OptionalPrimitive(t.Context(), true)
 	if !ok {
 		t.Fatal(err)
 	}
