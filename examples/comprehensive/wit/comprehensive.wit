@@ -1,0 +1,255 @@
+package arcjet:comprehensive;
+
+/// Core types and primitives interface
+interface types {
+    /// All primitive types
+    type byte-value = u8;
+    type small-int = s16;
+    type large-int = s64;
+    type precision-float = f64;
+    type unicode-char = char;
+    type text = string;
+
+    /// A comprehensive record with various field types
+    record person {
+        id: u64,
+        name: string,
+        age: u8,
+        email: option<string>,
+        active: bool,
+        balance: f64,
+        tags: list<string>,
+        metadata: option<list<tuple<string, string>>>,
+    }
+
+    /// Variant type with associated data
+    variant message {
+        text(string),
+        image(list<u8>),
+        video(tuple<list<u8>, u32>), // data and duration
+        file(tuple<string, list<u8>>), // filename and content
+        empty,
+    }
+
+    /// Simple enum without associated data
+    enum priority {
+        low,
+        medium,
+        high,
+        critical,
+    }
+
+    /// Flags type for permissions
+    flags permissions {
+        read,
+        write,
+        execute,
+        admin,
+        delete,
+    }
+
+    /// Complex result type
+    type operation-result = result<person, error-info>;
+
+    /// Error information record
+    record error-info {
+        code: u32,
+        message: string,
+        details: option<string>,
+        timestamp: u64,
+    }
+
+    /// Tuple types
+    type coordinates = tuple<f64, f64>; // latitude, longitude
+    type rgb-color = tuple<u8, u8, u8>;
+    type complex-tuple = tuple<string, u32, option<bool>, list<s32>>;
+}
+
+/// Data structures interface that uses types from the types interface
+interface collections {
+    use types.{person, message, priority, permissions, operation-result, coordinates};
+
+    /// A map-like structure
+    record key-value-store {
+        entries: list<tuple<string, string>>,
+        metadata: option<string>,
+    }
+
+    /// A simple node structure (avoiding recursive types)
+    record tree-node {
+        name: string,
+        value: option<string>,
+        is-leaf: bool,
+    }
+
+    /// Configuration structure
+    record config {
+        name: string,
+        version: tuple<u32, u32, u32>, // major, minor, patch
+        features: permissions,
+        priority: priority,
+        locations: list<coordinates>,
+        users: list<person>,
+    }
+
+    /// Functions that work with collections
+    process-messages: func(messages: list<message>) -> result<u32, string>;
+    find-person: func(store: key-value-store, id: u64) -> option<person>;
+    validate-config: func(cfg: config) -> result<_, list<string>>;
+
+    /// Functions accepting and returning records
+    create-person: func(name: string, age: u8, email: option<string>) -> person;
+    update-person: func(person: person, changes: person) -> person;
+    get-person-summary: func(p: person) -> tuple<string, u8, bool>;
+
+    /// Functions working with variants
+    process-message: func(msg: message) -> result<string, string>;
+    create-text-message: func(content: string) -> message;
+    create-file-message: func(filename: string, data: list<u8>) -> message;
+
+    /// Functions working with enums
+    set-priority: func(p: priority) -> string;
+    get-next-priority: func(current: priority) -> priority;
+    compare-priorities: func(a: priority, b: priority) -> s8;
+
+    /// Functions working with flags
+    check-permissions: func(user-perms: permissions, required: permissions) -> bool;
+    grant-permission: func(current: permissions, new-perm: permissions) -> permissions;
+    list-permissions: func(perms: permissions) -> list<string>;
+}
+
+
+
+/// Utility functions interface
+interface utilities {
+    use types.{rgb-color, complex-tuple, text, operation-result};
+    use collections.{tree-node, config};
+
+    /// Functions demonstrating various parameter and return types
+
+    /// No parameters, returns primitive
+    get-random-number: func() -> u32;
+
+    /// Multiple primitive parameters
+    calculate: func(a: f64, b: f64, operation: string) -> result<f64, string>;
+
+    /// List parameters and returns
+    sort-numbers: func(numbers: list<s32>) -> list<s32>;
+    merge-lists: func(a: list<string>, b: list<string>) -> list<string>;
+
+    /// Option and result handling
+    parse-number: func(input: string) -> option<f64>;
+    divide: func(a: f64, b: f64) -> result<f64, string>;
+
+    /// Complex types
+    process-tree: func(root: tree-node) -> result<u32, string>;
+    generate-config: func(name: string, users: u32) -> config;
+
+    /// Tuple handling
+    distance: func(point1: tuple<f64, f64>, point2: tuple<f64, f64>) -> f64;
+    mix-colors: func(color1: rgb-color, color2: rgb-color, ratio: f32) -> rgb-color;
+
+    /// Complex tuple
+    process-complex: func(data: complex-tuple) -> result<string, string>;
+
+    /// Multiple return values using tuple
+    get-stats: func(data: list<u32>) -> tuple<u32, u32, f64>; // min, max, average
+
+    /// Functions with no return value
+    log-message: func(level: string, message: string);
+    notify: func(recipient: string, subject: string, body: string);
+
+    /// Functions accepting and returning records
+    format-person: func(p: operation-result) -> string;
+    create-error: func(code: u32, msg: string) -> operation-result;
+
+    /// Functions with complex record combinations
+    merge-configs: func(base: config, override: config) -> config;
+    extract-user-emails: func(cfg: config) -> list<string>;
+}
+
+/// Logging interface for imports
+interface logger {
+    debug: func(msg: string);
+    info: func(msg: string);
+    warn: func(msg: string);
+    error: func(msg: string);
+    with-context: func(context: string, msg: string);
+}
+
+/// HTTP client interface for imports
+interface http-client {
+    record http-request {
+        method: string,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>,
+    }
+
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    send-request: func(req: http-request) -> result<http-response, string>;
+}
+
+/// Main world that ties everything together
+world comprehensive {
+    /// Import types from interfaces for direct use
+    use types.{person, message, priority, permissions, error-info};
+    use collections.{config};
+
+    /// Import external dependencies
+    import logger;
+    import http-client;
+
+    /// Export all our interfaces
+    export types;
+    export collections;
+    export utilities;
+
+    /// Export some standalone functions
+    export hello-world: func() -> string;
+    export get-version: func() -> tuple<u32, u32, u32>;
+    export health-check: func() -> result<string, string>;
+
+    /// Export functions that use imported interfaces
+    export process-with-logging: func(data: string) -> result<string, string>;
+    export fetch-and-process: func(url: string) -> result<string, string>;
+
+    /// Export functions with various signatures to test codegen
+    export all-primitives: func(
+        b: bool,
+        s8-val: s8, s16-val: s16, s32-val: s32, s64-val: s64,
+        u8-val: u8, u16-val: u16, u32-val: u32, u64-val: u64,
+        f32-val: f32, f64-val: f64,
+        char-val: char, string-val: string
+    ) -> tuple<bool, string>;
+
+    export complex-return: func() -> result<
+        tuple<list<string>, option<u64>>,
+        tuple<string, u32>
+    >;
+
+    /// Export functions working with records
+    export create-test-person: func() -> person;
+    export validate-person: func(p: person) -> result<_, string>;
+    export combine-people: func(p1: person, p2: person) -> person;
+
+    /// Export functions working with variants
+    export demo-message-handling: func(msg: message) -> string;
+    export create-demo-messages: func() -> list<message>;
+
+    /// Export functions working with enums and flags
+    export process-priority: func(p: priority) -> priority;
+    export test-permissions: func(perms: permissions) -> list<string>;
+    export combine-permissions: func(a: permissions, b: permissions) -> permissions;
+
+    /// Export functions with complex type combinations
+    export analyze-config: func(cfg: config) -> result<
+        tuple<u32, priority, permissions>,
+        error-info
+    >;
+}
