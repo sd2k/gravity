@@ -17,10 +17,13 @@ impl Guest for BasicWorld {
     fn primitive() -> bool {
         true
     }
-    fn optional_primitive() -> Option<bool> {
+    fn optional_primitive(_: Option<bool>) -> Option<bool> {
         Some(true)
     }
     fn result_primitive() -> Result<bool, String> {
         Ok(true)
+    }
+    fn optional_string(s: Option<String>) -> Option<String> {
+        s
     }
 }
