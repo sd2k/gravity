@@ -117,6 +117,11 @@ impl Bindgen for Func<'_> {
         let iter_element = "e";
         let iter_base = "base";
 
+        let payload = &format!("{:?}", inst);
+        quote_in! {
+            self.body =>
+            $(comment([payload]))
+        }
         match inst {
             Instruction::GetArg { nth } => {
                 let arg = &format!("arg{nth}");
