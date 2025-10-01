@@ -66,7 +66,13 @@ pub fn resolve_type(typ: &Type, resolve: &Resolve) -> GoType {
                 TypeDefKind::Resource => todo!("TODO(#5): implement resources"),
                 TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
                 TypeDefKind::Flags(_) => todo!("TODO(#4): implement flag conversion"),
-                TypeDefKind::Tuple(_) => todo!("TODO(#4): implement tuple conversion"),
+                TypeDefKind::Tuple(tuple) => GoType::MultiReturn(
+                    tuple
+                        .types
+                        .iter()
+                        .map(|t| resolve_type(t, resolve))
+                        .collect(),
+                ),
                 TypeDefKind::Variant(_) => GoType::UserDefined(
                     name.clone()
                         .clone()

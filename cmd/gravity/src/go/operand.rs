@@ -13,25 +13,12 @@ pub enum Operand {
     Literal(String),
     /// A single variable or expression
     SingleValue(String),
-    /// A tuple of two values (for multi-value returns)
-    MultiValue((String, String)),
-}
-
-impl Operand {
-    /// Returns the primary value of the operand.
+    /// A tuple of two values (shortcut for for multi-value returns).
     ///
-    /// For single values and literals, returns the value itself.
-    /// For multi-value tuples, returns the first value.
-    ///
-    /// # Returns
-    /// A string representation of the primary value.
-    pub fn as_string(&self) -> String {
-        match self {
-            Operand::Literal(s) => s.clone(),
-            Operand::SingleValue(s) => s.clone(),
-            Operand::MultiValue((s1, _)) => s1.clone(),
-        }
-    }
+    /// This is used when returning `val, ok` or `result, err` from Go functions.
+    DoubleValue(String, String),
+    /// A tuple of two or more values (for tuples)
+    MultiValue(Vec<String>),
 }
 
 // Implement genco's FormatInto for Operand so it can be used in quote! macros
@@ -40,11 +27,21 @@ impl FormatInto<Go> for &Operand {
         match self {
             Operand::Literal(val) => tokens.append(ItemStr::from(val)),
             Operand::SingleValue(val) => tokens.append(ItemStr::from(val)),
-            Operand::MultiValue((val1, val2)) => {
-                tokens.append(ItemStr::from(val1));
+            Operand::DoubleValue(val, ok) => {
+                tokens.append(ItemStr::from(val));
                 tokens.append(static_literal(","));
                 tokens.space();
-                tokens.append(ItemStr::from(val2));
+                tokens.append(ItemStr::from(ok));
+            }
+            Operand::MultiValue(vals) => {
+                if let Some((last, vals)) = vals.split_last() {
+                    for val in vals.iter() {
+                        tokens.append(val);
+                        tokens.append(static_literal(","));
+                        tokens.space();
+                    }
+                    tokens.append(last);
+                }
             }
         }
     }
@@ -86,10 +83,22 @@ mod tests {
     }
 
     #[test]
-    fn test_operand_multi_value() {
-        let op = Operand::MultiValue(("val1".to_string(), "val2".to_string()));
+    fn test_operand_double_value() {
+        let op = Operand::DoubleValue("val1".to_string(), "val2".to_string());
         let mut tokens = Tokens::<Go>::new();
         op.format_into(&mut tokens);
         assert_eq!(tokens.to_string().unwrap(), "val1, val2");
+    }
+
+    #[test]
+    fn test_operand_multi_value() {
+        let op = Operand::MultiValue(vec![
+            "val1".to_string(),
+            "val2".to_string(),
+            "val3".to_string(),
+        ]);
+        let mut tokens = Tokens::<Go>::new();
+        op.format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "val1, val2, val3");
     }
 }
