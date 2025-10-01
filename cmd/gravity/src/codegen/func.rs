@@ -630,13 +630,13 @@ impl Bindgen for Func<'_> {
                         Direction::Export => {
                             quote_in! { self.body =>
                                 $['\r']
-                                i.module.Memory().WriteByte($ptr+$offset, $byte)
+                                i.module.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                         Direction::Import { .. } => {
                             quote_in! { self.body =>
                                 $['\r']
-                                mod.Memory().WriteByte($ptr+$offset, $byte)
+                                mod.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                     }
@@ -657,7 +657,7 @@ impl Bindgen for Func<'_> {
                                     $(comment(["TODO(#8): Return an error if the return type allows it"]))
                                     panic($errors_new("invalid int8 value encountered"))
                                 }
-                                i.module.Memory().WriteByte($ptr+$offset, $byte)
+                                i.module.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                         Direction::Import { .. } => {
@@ -672,7 +672,7 @@ impl Bindgen for Func<'_> {
                                 default:
                                     panic($errors_new("invalid int8 value encountered"))
                                 }
-                                mod.Memory().WriteByte($ptr+$offset, $byte)
+                                mod.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                     }
@@ -687,13 +687,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le($ptr+$offset, $tag)
+                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le($ptr+$offset, $tag)
+                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
                         }
                     }
                 }
@@ -707,13 +707,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le($ptr+$offset, uint32($len))
+                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le($ptr+$offset, uint32($len))
+                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
                         }
                     }
                 }
@@ -727,13 +727,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le($ptr+$offset, uint32($value))
+                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le($ptr+$offset, uint32($value))
+                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
                         }
                     }
                 }
@@ -1306,13 +1306,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint64Le($ptr+$offset, $tag)
+                            i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint64Le($ptr+$offset, $tag)
+                            mod.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
                         }
                     }
                 }
@@ -1326,13 +1326,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint64Le($ptr+$offset, $tag)
+                            i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint64Le($ptr+$offset, $tag)
+                            mod.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
                         }
                     }
                 }
