@@ -819,7 +819,6 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::MultiValue((result.into(), ok.into())));
             }
             Instruction::OptionLower {
-                payload: Type::String,
                 results: result_types,
                 ..
             } => {
@@ -827,6 +826,10 @@ impl Bindgen for Func<'_> {
                 let (mut none_block, none_results) = self.pop_block();
 
                 let tmp = self.tmp();
+
+                // If there are no result_types, then the payload will be a pointer,
+                // because that's how we represent optionals in Go.
+                let is_pointer = result_types.is_empty();
 
                 let mut vars: Tokens<Go> = Tokens::new();
                 for i in 0..result_types.len() {
@@ -856,18 +859,14 @@ impl Bindgen for Func<'_> {
                     Operand::Literal(_) => {
                         panic!("impossible: expected Operand::MultiValue but got Operand::Literal")
                     }
-                    // TODO(#7): This is a weird hack to implement `option<string>`
-                    // as arguments that currently only works for strings
-                    // because it checks the empty string as the zero value to
-                    // consider it None
                     Operand::SingleValue(value) => {
                         quote_in! { self.body =>
                             $['\r']
                             $vars
-                            if $value == "" {
+                            if $(&self.go_imports.reflect_value_of)($value).IsZero() {
                                 $none_block
                             } else {
-                                variantPayload := $value
+                                variantPayload := $(if is_pointer => *)$value
                                 $some_block
                             }
                         };
@@ -885,7 +884,6 @@ impl Bindgen for Func<'_> {
                     }
                 };
             }
-            Instruction::OptionLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::RecordLower { record, .. } => {
                 let tmp = self.tmp();
                 let operand = &operands[0];

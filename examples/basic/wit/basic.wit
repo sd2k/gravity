@@ -12,6 +12,8 @@ world basic {
 
   export hello: func() -> result<string, string>;
   export primitive: func() -> bool;
-  export optional-primitive: func() -> option<bool>;
+  export optional-primitive: func(b: option<bool>) -> option<bool>;
   export result-primitive: func() -> result<bool, string>;
+
+  export optional-string: func(s: option<string>) -> option<string>;
 }
