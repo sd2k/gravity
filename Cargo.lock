@@ -239,6 +239,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-resources"
+version = "0.0.2"
+dependencies = [
+ "wit-bindgen",
+ "wit-component",
+]
+
+[[package]]
+name = "example-resources-simple"
+version = "0.0.2"
+dependencies = [
+ "wit-bindgen",
+ "wit-component",
+]
+
+[[package]]
 name = "example-tuples"
 version = "0.0.2"
 dependencies = [

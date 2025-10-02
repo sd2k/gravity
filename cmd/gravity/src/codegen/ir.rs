@@ -2,6 +2,20 @@ use wit_bindgen_core::wit_parser::{Function, Type};
 
 use crate::go::{GoIdentifier, GoType};
 
+/// Information about a resource that is exported from a WASM module.
+/// These resources need [resource-new] and [resource-drop] host functions.
+#[derive(Debug, Clone)]
+pub struct ExportedResourceInfo {
+    /// The interface name (e.g., "types-a")
+    pub interface_name: String,
+    /// The resource name (e.g., "foo")
+    pub resource_name: String,
+    /// The prefixed name (e.g., "types-a-foo")
+    pub prefixed_name: String,
+    /// The wazero module name for exports (e.g., "[export]arcjet:resources/types-a")
+    pub wazero_export_module_name: String,
+}
+
 /// An analyzed WIT import.
 #[derive(Debug, Clone)]
 pub struct AnalyzedImports {
@@ -11,6 +25,8 @@ pub struct AnalyzedImports {
     pub standalone_types: Vec<AnalyzedType>,
     /// All standalone functions found in the input world.
     pub standalone_functions: Vec<AnalyzedFunction>,
+    /// All exported resources that need [resource-new] and [resource-drop] host functions.
+    pub exported_resources: Vec<ExportedResourceInfo>,
 
     /// The name of the factory type to be generated.
     pub factory_name: GoIdentifier,
