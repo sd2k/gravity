@@ -20,6 +20,7 @@ pub struct GoImports {
     pub wazero_api_decode_f64: Import,
     pub wazero_api_encode_f64: Import,
     pub reflect_value_of: Import,
+    pub sync_mutex: Import,
 }
 
 impl Default for GoImports {
@@ -88,6 +89,7 @@ impl GoImports {
                 "EncodeF64",
             ),
             reflect_value_of: genco::lang::go::import("reflect", "ValueOf"),
+            sync_mutex: genco::lang::go::import("sync", "Mutex"),
         }
     }
 }

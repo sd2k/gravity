@@ -63,8 +63,33 @@ pub fn resolve_type(typ: &Type, resolve: &Resolve) -> GoType {
                 TypeDefKind::Record(_) => {
                     GoType::UserDefined(name.clone().expect("expected record to have a name"))
                 }
-                TypeDefKind::Resource => todo!("TODO(#5): implement resources"),
-                TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
+                TypeDefKind::Resource => {
+                    GoType::Resource(name.clone().expect("expected resource to have a name"))
+                }
+                TypeDefKind::Handle(handle) => match handle {
+                    wit_bindgen_core::wit_parser::Handle::Own(id) => {
+                        let resource_def = resolve
+                            .types
+                            .get(*id)
+                            .expect("failed to find resource definition for owned handle");
+                        let resource_name = resource_def
+                            .name
+                            .clone()
+                            .expect("expected resource to have a name");
+                        GoType::OwnHandle(resource_name)
+                    }
+                    wit_bindgen_core::wit_parser::Handle::Borrow(id) => {
+                        let resource_def = resolve
+                            .types
+                            .get(*id)
+                            .expect("failed to find resource definition for borrowed handle");
+                        let resource_name = resource_def
+                            .name
+                            .clone()
+                            .expect("expected resource to have a name");
+                        GoType::BorrowHandle(resource_name)
+                    }
+                },
                 TypeDefKind::Flags(_) => todo!("TODO(#4): implement flag conversion"),
                 TypeDefKind::Tuple(tuple) => GoType::MultiReturn(
                     tuple
