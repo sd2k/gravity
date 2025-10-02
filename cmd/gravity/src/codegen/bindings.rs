@@ -56,7 +56,7 @@ impl<'a> Bindings<'a> {
     pub fn generate(&mut self) {
         let (imports, chains) = self.generate_imports();
         self.generate_factory(&imports, chains);
-        self.generate_exports(&imports.instance_name);
+        self.generate_exports(&imports.instance_name, &imports);
     }
 
     /// Generates the imports for the bindings.
@@ -89,12 +89,13 @@ impl<'a> Bindings<'a> {
     ///
     /// Note: for now this only generates functions; types and interfaces are
     /// still TODO
-    fn generate_exports(&mut self, instance: &GoIdentifier) {
+    fn generate_exports(&mut self, instance: &GoIdentifier, analyzed_imports: &AnalyzedImports) {
         let config = ExportConfig {
             instance,
             world: self.world,
             resolve: self.resolve,
             sizes: self.sizes,
+            analyzed_imports,
         };
         ExportGenerator::new(config).format_into(&mut self.out)
     }

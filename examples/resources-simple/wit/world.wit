@@ -1,0 +1,19 @@
+package arcjet:resources;
+
+interface iface {
+    resource fooer {
+        constructor(x: u32, y: string);
+        get-x: func() -> u32;
+        set-x: func(x: u32);
+        get-y: func() -> string;
+        set-y: func(y: string);
+    }
+}
+
+world resources {
+    import iface;
+    use iface.{fooer};
+
+    export use-fooer: func(foo: borrow<fooer>);
+    export use-fooer-return-new: func(foo: borrow<fooer>) -> fooer;
+}

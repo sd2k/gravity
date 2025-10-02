@@ -18,10 +18,10 @@ use crate::{
         },
     },
     go::{
-        GoIdentifier, GoResult, GoType,
+        GoIdentifier, GoResult, GoType, comment,
         imports::{CONTEXT_CONTEXT, WAZERO_API_MODULE},
     },
-    resolve_type,
+    resolve_type, resolve_wasm_type,
 };
 
 /// Analyzer for imports - only does analysis, no code generation
@@ -57,6 +57,55 @@ impl<'a> ImportAnalyzer<'a> {
             }
         }
 
+        // Scan exports for resources that need [resource-new] and [resource-drop] host functions
+        let mut exported_resources = Vec::new();
+        let world_exports = &self.world.exports;
+
+        for (_export_name, world_item) in world_exports.iter() {
+            if let WorldItem::Interface { id, .. } = world_item {
+                let interface = &self.resolve.interfaces[*id];
+                if let Some(interface_name) = &interface.name {
+                    // Build the fully qualified interface name (e.g., "arcjet:resources/types-a")
+                    let full_interface_name = if let Some(package_id) = &interface.package {
+                        let package = &self.resolve.packages[*package_id];
+                        format!(
+                            "{}:{}/{}",
+                            package.name.namespace, package.name.name, interface_name
+                        )
+                    } else {
+                        interface_name.to_string()
+                    };
+
+                    // Get the short interface name for prefixing (e.g., "types-a")
+                    let short_interface_name =
+                        interface_name.split('/').last().unwrap_or(interface_name);
+
+                    // Check for resources in this exported interface
+                    for &type_id in interface.types.values() {
+                        let type_def = &self.resolve.types[type_id];
+                        if matches!(
+                            type_def.kind,
+                            wit_bindgen_core::wit_parser::TypeDefKind::Resource
+                        ) {
+                            if let Some(resource_name) = &type_def.name {
+                                let prefixed_name =
+                                    format!("{}-{}", short_interface_name, resource_name);
+                                let wazero_export_module_name =
+                                    format!("[export]{}", full_interface_name);
+
+                                exported_resources.push(crate::codegen::ir::ExportedResourceInfo {
+                                    interface_name: short_interface_name.to_string(),
+                                    resource_name: resource_name.clone(),
+                                    prefixed_name,
+                                    wazero_export_module_name,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Generate factory-related identifiers
         let factory_name = GoIdentifier::public(format!("{}-factory", self.world.name));
         let instance_name = GoIdentifier::public(format!("{}-instance", self.world.name));
@@ -66,6 +115,7 @@ impl<'a> ImportAnalyzer<'a> {
             interfaces,
             standalone_types,
             standalone_functions,
+            exported_resources,
             factory_name,
             instance_name,
             constructor_name,
@@ -132,7 +182,7 @@ impl<'a> ImportAnalyzer<'a> {
 
         InterfaceMethod {
             name: func.name.clone(),
-            go_method_name: GoIdentifier::public(&func.name),
+            go_method_name: GoIdentifier::from_resource_function(&func.name),
             parameters,
             return_type,
             wit_function: func.clone(),
@@ -243,8 +293,14 @@ impl<'a> ImportAnalyzer<'a> {
                     })
                     .collect(),
             },
-            TypeDefKind::Resource => todo!("TODO(#5): implement resources"),
-            TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
+            TypeDefKind::Resource => {
+                // Resources are handled separately as interfaces with methods
+                return None;
+            }
+            TypeDefKind::Handle(_) => {
+                // Handles are handled separately in the resource implementation
+                return None;
+            }
             TypeDefKind::Unknown => panic!("cannot generate Unknown type"),
         })
     }
@@ -303,10 +359,50 @@ impl<'a> ImportCodeGenerator<'a> {
 
             for method in &interface.methods {
                 chain.push();
-                let func_builder =
-                    self.generate_host_function_builder(method, &interface.constructor_param_name);
+                let interface_name = interface.name.split('/').last().unwrap_or(&interface.name);
+                let func_builder = self.generate_host_function_builder(
+                    method,
+                    &interface.constructor_param_name,
+                    interface_name,
+                );
                 quote_in! { chain =>
                     $func_builder
+                };
+            }
+
+            // Generate drop handlers for resources
+            let mut resource_names = std::collections::HashSet::new();
+            for method in &interface.methods {
+                if method.name.contains("[constructor]") {
+                    if let Some(ret) = &method.return_type {
+                        if let crate::go::GoType::OwnHandle(name)
+                        | crate::go::GoType::BorrowHandle(name)
+                        | crate::go::GoType::Resource(name) = &ret.go_type
+                        {
+                            resource_names.insert(name.clone());
+                        }
+                    }
+                }
+            }
+
+            for resource_name in resource_names {
+                chain.push();
+                quote_in! { chain =>
+                    NewFunctionBuilder().
+                    WithFunc(func(ctx $CONTEXT_CONTEXT, mod $WAZERO_API_MODULE, arg0 uint32) {
+                        $(comment(&[
+                            "[resource-drop]: called when guest drops a resource",
+                            "",
+                            "With borrow-only parameters, guests never take ownership of host resources.",
+                            "Resources stay in host table until host explicitly removes them.",
+                            "This callback is a no-op since host controls the full lifecycle.",
+                            "",
+                            "Note: If we add owned parameter support in the future, this would need",
+                            "to implement ref-counting and state tracking to properly cleanup consumed resources.",
+                        ]))
+                        _ = arg0
+                    }).
+                    Export($(quoted(&format!("[resource-drop]{}", resource_name)))).
                 };
             }
 
@@ -329,6 +425,9 @@ impl FormatInto<Go> for ImportCodeGenerator<'_> {
     fn format_into(self, tokens: &mut Tokens<Go>) {
         // Generate interface type definitions
         for interface in &self.analyzed.interfaces {
+            // Generate resource interfaces first
+            self.generate_resource_interfaces(interface, tokens);
+
             self.generate_interface_type(interface, tokens);
 
             for typ in &interface.types {
@@ -344,17 +443,303 @@ impl FormatInto<Go> for ImportCodeGenerator<'_> {
 }
 
 impl<'a> ImportCodeGenerator<'a> {
+    fn generate_resource_interfaces(&self, interface: &AnalyzedInterface, tokens: &mut Tokens<Go>) {
+        use std::collections::{HashMap, HashSet};
+
+        // Collect methods by resource name
+        let interface_name = interface.name.split('/').last().unwrap_or(&interface.name);
+        let mut resource_methods: HashMap<String, Vec<&InterfaceMethod>> = HashMap::new();
+        let mut resource_names = HashSet::new();
+
+        for method in &interface.methods {
+            // Only include actual resource methods (not freestanding functions with resource params)
+            if !method.name.contains("[method]") {
+                continue;
+            }
+
+            // Check if this is a resource method (has self parameter or returns resource)
+            let resource_name = if let Some(param) = method.parameters.first() {
+                match &param.go_type {
+                    GoType::OwnHandle(name)
+                    | GoType::BorrowHandle(name)
+                    | GoType::Resource(name) => Some(name.clone()),
+                    _ => None,
+                }
+            } else if let Some(ret) = &method.return_type {
+                match &ret.go_type {
+                    GoType::OwnHandle(name)
+                    | GoType::BorrowHandle(name)
+                    | GoType::Resource(name) => Some(name.clone()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
+            if let Some(resource_name) = resource_name {
+                resource_names.insert(resource_name.clone());
+                resource_methods
+                    .entry(resource_name)
+                    .or_insert_with(Vec::new)
+                    .push(method);
+            }
+        }
+
+        // First generate handle type aliases for each resource
+        for resource_name in &resource_names {
+            let prefixed_name = format!("{}-{}", interface_name, resource_name);
+            let handle_name = format!("{}-handle", prefixed_name);
+            let go_name = GoIdentifier::private(&handle_name);
+            let comment_text = format!(
+                "{} is a handle to the {} resource in the {} interface.",
+                String::from(&go_name),
+                resource_name,
+                interface_name
+            );
+            quote_in! { *tokens =>
+                $['\n']
+                $(comment(&[comment_text.as_str()]))
+                type $go_name uint32
+            }
+        }
+
+        // Generate interface for each resource
+        for (resource_name, methods) in resource_methods {
+            let prefixed_name = format!("{}-{}", interface_name, resource_name);
+            let interface_type_name = GoIdentifier::public(&prefixed_name);
+
+            // Filter out constructor and generate method signatures
+            let method_sigs = methods
+                .iter()
+                .filter(|m| !m.name.contains("[constructor]"))
+                .map(|method| {
+                    let method_name = &method.go_method_name;
+
+                    // Skip 'self' parameter for method signatures
+                    let params = method
+                        .parameters
+                        .iter()
+                        .skip(1)
+                        .map(|p| quote!($(&p.name) $(&p.go_type)))
+                        .collect::<Vec<_>>();
+
+                    let return_type = method
+                        .return_type
+                        .as_ref()
+                        .map(|t| GoResult::Anon(t.go_type.clone()))
+                        .unwrap_or(GoResult::Empty);
+
+                    // Add context parameter at the beginning
+                    if params.is_empty() {
+                        quote!($method_name(ctx $CONTEXT_CONTEXT) $return_type)
+                    } else {
+                        quote!($method_name(ctx $CONTEXT_CONTEXT, $(for p in params join (, ) => $p)) $return_type)
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            quote_in! { *tokens =>
+                $['\n']
+                type $interface_type_name interface {
+                    $(for sig in method_sigs join ($['\r']) => $sig)
+                }
+            }
+        }
+    }
+
     fn generate_interface_type(&self, interface: &AnalyzedInterface, tokens: &mut Tokens<Go>) {
+        // Collect resource names and their type parameters
+        let interface_name = interface.name.split('/').last().unwrap_or(&interface.name);
+        let mut resource_names = Vec::new();
+        let mut resource_type_params: Vec<(GoIdentifier, GoIdentifier, GoIdentifier)> = Vec::new();
+
+        for method in &interface.methods {
+            if method.name.contains("[constructor]") {
+                if let Some(ret) = &method.return_type {
+                    if let GoType::OwnHandle(name)
+                    | GoType::BorrowHandle(name)
+                    | GoType::Resource(name) = &ret.go_type
+                    {
+                        let prefixed_name = format!("{}-{}", interface_name, name);
+                        let pointer_interface_name =
+                            GoIdentifier::public(format!("p-{}", prefixed_name));
+                        let value_type_param =
+                            GoIdentifier::public(format!("t-{}-value", prefixed_name));
+                        let pointer_type_param =
+                            GoIdentifier::public(format!("p-t-{}", prefixed_name));
+                        resource_names.push(name.clone());
+                        // Store the actual identifiers, not quotes
+                        resource_type_params.push((
+                            value_type_param,
+                            pointer_type_param,
+                            pointer_interface_name,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Generate method signatures with type parameters
+        // Include constructors and freestanding functions (which may take/return resources)
         let methods = interface
             .methods
             .iter()
-            .map(|method| self.generate_method_signature(method));
+            .filter(|m| {
+                m.name.contains("[constructor]") ||
+                (!m.name.contains("[method]") && !m.name.contains("[static]"))
+            })
+            .map(|method| {
+                let is_constructor = method.name.contains("[constructor]");
+                let is_freestanding = !method.name.contains("[constructor]") &&
+                                     !method.name.contains("[method]") &&
+                                     !method.name.contains("[static]");
 
-        quote_in! { *tokens =>
-            $['\n']
-            type $(&interface.go_interface_name) interface {
-                $(for method in methods join ($['\r']) => $method)
+                let mut sig = self.generate_method_signature_with_interface(method, interface_name);
+
+                // Replace return type with type parameter for constructors
+                if is_constructor {
+                    if let Some(ret) = &method.return_type {
+                        if let GoType::OwnHandle(name) | GoType::BorrowHandle(name) | GoType::Resource(name) = &ret.go_type {
+                            let prefixed_name = format!("{}-{}", interface_name, name);
+                            // Use value type parameter for return type (not pointer)
+                            let value_type_param = GoIdentifier::public(format!("t-{}-value", prefixed_name));
+                            // Add context parameter at the beginning
+                            if method.parameters.is_empty() {
+                                sig = quote!($(&method.go_method_name)(ctx $CONTEXT_CONTEXT) $value_type_param);
+                            } else {
+                                sig = quote!($(&method.go_method_name)(ctx $CONTEXT_CONTEXT, $(for p in &method.parameters join (, ) => $(&p.name) $(&p.go_type))) $value_type_param);
+                            }
+                        }
+                    }
+                } else if is_freestanding {
+                    // For freestanding functions, replace resource parameters with type parameters
+                    let params_with_ctx = std::iter::once(quote!(ctx $CONTEXT_CONTEXT)).chain(
+                        method.parameters.iter().map(|p| {
+                            let param_type = match &p.go_type {
+                                GoType::BorrowHandle(name) => {
+                                    // Use pointer type parameter for borrowed resource params
+                                    let prefixed_name = format!("{}-{}", interface_name, name);
+                                    let pointer_type_param = GoIdentifier::public(format!("p-t-{}", prefixed_name));
+                                    quote!($pointer_type_param)
+                                }
+                                GoType::OwnHandle(name) | GoType::Resource(name) => {
+                                    // Use value type parameter for owned/resource params
+                                    let prefixed_name = format!("{}-{}", interface_name, name);
+                                    let value_type_param = GoIdentifier::public(format!("t-{}-value", prefixed_name));
+                                    quote!($value_type_param)
+                                }
+                                _ => {
+                                    let resolved = self.resolve_type_with_interface(&p.go_type, interface_name);
+                                    quote!($(&resolved))
+                                }
+                            };
+                            quote!($(&p.name) $param_type)
+                        })
+                    );
+
+                    let return_type = method.return_type.as_ref().map(|r| {
+                        match &r.go_type {
+                            GoType::BorrowHandle(name) => {
+                                // Use pointer type parameter for borrowed resource return types
+                                let prefixed_name = format!("{}-{}", interface_name, name);
+                                let pointer_type_param = GoIdentifier::public(format!("p-t-{}", prefixed_name));
+                                quote!($pointer_type_param)
+                            }
+                            GoType::OwnHandle(name) | GoType::Resource(name) => {
+                                // Use value type parameter for owned/resource return types
+                                let prefixed_name = format!("{}-{}", interface_name, name);
+                                let value_type_param = GoIdentifier::public(format!("t-{}-value", prefixed_name));
+                                quote!($value_type_param)
+                            }
+                            _ => {
+                                let resolved = self.resolve_type_with_interface(&r.go_type, interface_name);
+                                quote!($(&resolved))
+                            }
+                        }
+                    });
+
+                    if let Some(ret) = return_type {
+                        sig = quote!($(&method.go_method_name)($(for p in params_with_ctx join (, ) => $p)) $ret);
+                    } else {
+                        sig = quote!($(&method.go_method_name)($(for p in params_with_ctx join (, ) => $p)));
+                    }
+                }
+
+                sig
+            });
+
+        if resource_type_params.is_empty() {
+            // No resources, generate regular interface
+            // Only include freestanding functions (not resource methods)
+            let methods = interface
+                .methods
+                .iter()
+                .filter(|m| {
+                    !m.name.contains("[method]")
+                        && !m.name.contains("[static]")
+                        && !m.name.contains("[constructor]")
+                })
+                .map(|method| self.generate_method_signature(method));
+
+            quote_in! { *tokens =>
+                $['\n']
+                type $(&interface.go_interface_name) interface {
+                    $(for method in methods join ($['\r']) => $method)
+                }
             }
+        } else {
+            // Generate generic interface with type parameters
+            quote_in! { *tokens =>
+                $['\n']
+                type $(&interface.go_interface_name)[$(for (value_param, pointer_param, pointer_iface) in &resource_type_params join (, ) => $value_param any, $pointer_param $pointer_iface[$value_param])] interface {
+                    $(for method in methods join ($['\r']) => $method)
+                }
+            }
+        }
+    }
+
+    /// Resolve a type with interface context, adding prefixes to resource handles
+    fn resolve_type_with_interface(&self, typ: &GoType, interface_name: &str) -> GoType {
+        match typ {
+            GoType::OwnHandle(name) | GoType::BorrowHandle(name) => {
+                let prefixed_name = format!("{}-{}", interface_name, name);
+                GoType::Resource(prefixed_name)
+            }
+            GoType::Resource(name) => {
+                // Check if it's already prefixed
+                if name.contains('-') {
+                    typ.clone()
+                } else {
+                    let prefixed_name = format!("{}-{}", interface_name, name);
+                    GoType::Resource(prefixed_name)
+                }
+            }
+            _ => typ.clone(),
+        }
+    }
+
+    fn generate_method_signature_with_interface(
+        &self,
+        method: &InterfaceMethod,
+        interface_name: &str,
+    ) -> Tokens<Go> {
+        let return_type = method
+            .return_type
+            .as_ref()
+            .map(|r| self.resolve_type_with_interface(&r.go_type, interface_name));
+
+        let params_with_ctx = std::iter::once(quote!(ctx $CONTEXT_CONTEXT)).chain(
+            method.parameters.iter().map(|p| {
+                let resolved_type = self.resolve_type_with_interface(&p.go_type, interface_name);
+                quote!($(&p.name) $(&resolved_type))
+            }),
+        );
+
+        match return_type {
+            Some(typ) => {
+                quote!($(&method.go_method_name)($(for p in params_with_ctx join (, ) => $p)) $(&typ))
+            }
+            None => quote!($(&method.go_method_name)($(for p in params_with_ctx join (, ) => $p))),
         }
     }
 
@@ -463,6 +848,8 @@ impl<'a> ImportCodeGenerator<'a> {
         // The name of the parameter representing the interface instance
         // in the generated function.
         param_name: &GoIdentifier,
+        // The interface name for resource table lookup
+        interface_name: &str,
     ) -> Tokens<Go> {
         let func_name = &method.name;
 
@@ -477,10 +864,171 @@ impl<'a> ImportCodeGenerator<'a> {
             .wasm_signature(AbiVariant::GuestImport, &method.wit_function);
         let result = if wasm_sig.results.is_empty() {
             GoResult::Empty
+        } else if wasm_sig.results.len() == 1 {
+            GoResult::Anon(resolve_wasm_type(&wasm_sig.results[0]))
         } else {
-            todo!("implement handling of wasm signatures with results");
+            GoResult::Anon(GoType::MultiReturn(
+                wasm_sig.results.iter().map(resolve_wasm_type).collect(),
+            ))
         };
-        let mut f = Func::import(param_name, result, self.sizes);
+        // Detect if this is a resource constructor or method
+        let func_name_str = &method.name;
+        let mut f = if func_name_str.starts_with("[constructor]")
+            || func_name_str.starts_with("[method]")
+        {
+            // Extract resource name
+            let resource_name = if func_name_str.starts_with("[constructor]") {
+                func_name_str.strip_prefix("[constructor]").unwrap()
+            } else if func_name_str.starts_with("[method]") {
+                // Format: "[method]resource-name.method-name"
+                let parts: Vec<&str> = func_name_str
+                    .strip_prefix("[method]")
+                    .unwrap()
+                    .split('.')
+                    .collect();
+                parts[0]
+            } else {
+                ""
+            };
+
+            // Convert to camelCase for table variable name
+            let interface_pascal = interface_name
+                .split('-')
+                .map(|s| {
+                    let mut c = s.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            let resource_pascal = resource_name
+                .split('-')
+                .map(|s| {
+                    let mut c = s.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("");
+
+            // Convert PascalCase to camelCase by lowercasing first character
+            let interface_camel = {
+                let mut c = interface_pascal.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
+                }
+            };
+
+            let table_var = format!("{}{}ResourceTable", interface_camel, resource_pascal);
+
+            Func::import_with_resource(
+                param_name,
+                result,
+                self.sizes,
+                interface_name.to_string(),
+                resource_name.to_string(),
+                table_var,
+            )
+        } else {
+            // Freestanding function - check if it has resource parameters or returns a resource
+            // If so, extract resource info from the first resource parameter or return type
+            let resource_param = method.wit_function.params.iter().find_map(|(_, typ)| {
+                if let wit_bindgen_core::wit_parser::Type::Id(id) = typ {
+                    let type_def = &self.resolve.types[*id];
+                    if let wit_bindgen_core::wit_parser::TypeDefKind::Handle(handle) =
+                        &type_def.kind
+                    {
+                        match handle {
+                            wit_bindgen_core::wit_parser::Handle::Own(resource_id)
+                            | wit_bindgen_core::wit_parser::Handle::Borrow(resource_id) => {
+                                let resource_def = &self.resolve.types[*resource_id];
+                                resource_def.name.as_ref().map(|name| name.clone())
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+
+            // Also check return type for resources
+            let resource_return = method.wit_function.result.as_ref().and_then(|ret_typ| {
+                if let wit_bindgen_core::wit_parser::Type::Id(id) = ret_typ {
+                    let type_def = &self.resolve.types[*id];
+                    match &type_def.kind {
+                        wit_bindgen_core::wit_parser::TypeDefKind::Handle(handle) => match handle {
+                            wit_bindgen_core::wit_parser::Handle::Own(resource_id)
+                            | wit_bindgen_core::wit_parser::Handle::Borrow(resource_id) => {
+                                let resource_def = &self.resolve.types[*resource_id];
+                                resource_def.name.as_ref().map(|name| name.clone())
+                            }
+                        },
+                        wit_bindgen_core::wit_parser::TypeDefKind::Resource => {
+                            type_def.name.as_ref().map(|name| name.clone())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+
+            let resource_name = resource_param.or(resource_return);
+
+            if let Some(resource_name) = resource_name {
+                // Build the resource context for freestanding function with resource params
+                let interface_pascal = interface_name
+                    .split('-')
+                    .map(|s| {
+                        let mut c = s.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                let resource_pascal = resource_name
+                    .split('-')
+                    .map(|s| {
+                        let mut c = s.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+
+                let interface_camel = {
+                    let mut c = interface_pascal.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
+                    }
+                };
+
+                let table_var = format!("{}{}ResourceTable", interface_camel, resource_pascal);
+
+                Func::import_with_resource(
+                    param_name,
+                    result,
+                    self.sizes,
+                    interface_name.to_string(),
+                    resource_name,
+                    table_var,
+                )
+            } else {
+                Func::import(param_name, result, self.sizes)
+            }
+        };
 
         // Magic
         wit_bindgen_core::abi::call(
@@ -541,6 +1089,7 @@ mod tests {
         let analyzed = AnalyzedImports {
             instance_name: GoIdentifier::public("TestInstance"),
             interfaces: vec![],
+            exported_resources: vec![],
             standalone_functions: vec![],
             standalone_types: vec![],
             factory_name: GoIdentifier::public("TestFactory"),
@@ -564,7 +1113,8 @@ mod tests {
         };
 
         let param_name = GoIdentifier::private("handler");
-        let result = generator.generate_host_function_builder(&method, &param_name);
+        let result =
+            generator.generate_host_function_builder(&method, &param_name, "test-interface");
 
         // The result should contain the WIT type-driven generation
         let code_str = result.to_string().unwrap();
@@ -583,6 +1133,7 @@ mod tests {
             interfaces: vec![],
             standalone_functions: vec![],
             standalone_types: vec![],
+            exported_resources: vec![],
             factory_name: GoIdentifier::public("TestFactory"),
             constructor_name: GoIdentifier::public("NewTestFactory"),
         };
@@ -612,7 +1163,8 @@ mod tests {
         };
 
         let param_name = GoIdentifier::private("handler");
-        let result = generator.generate_host_function_builder(&u32_method, &param_name);
+        let result =
+            generator.generate_host_function_builder(&u32_method, &param_name, "test-interface");
 
         // Should have only one uint32 parameter (plus ctx and mod)
         let code_str = result.to_string().unwrap();

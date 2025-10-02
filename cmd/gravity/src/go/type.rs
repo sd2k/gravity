@@ -48,6 +48,12 @@ pub enum GoType {
     MultiReturn(Vec<GoType>),
     /// User-defined type (records, enums, type aliases)
     UserDefined(String),
+    /// Resource type (Component Model resources)
+    Resource(String),
+    /// Owned handle to a resource
+    OwnHandle(String),
+    /// Borrowed handle to a resource
+    BorrowHandle(String),
     /// Represents no value/void
     Nothing,
 }
@@ -86,6 +92,9 @@ impl GoType {
             | GoType::Int64
             | GoType::Float32
             | GoType::Float64 => false,
+
+            // Resources and handles are represented as integers and don't need cleanup
+            GoType::Resource(_) | GoType::OwnHandle(_) | GoType::BorrowHandle(_) => false,
 
             // String and slices allocate memory and need cleanup
             GoType::String | GoType::Slice(_) => true,
@@ -187,6 +196,15 @@ impl FormatInto<Go> for &GoType {
             }
             GoType::UserDefined(name) => {
                 let id = GoIdentifier::public(name);
+                id.format_into(tokens)
+            }
+            GoType::Resource(name) | GoType::OwnHandle(name) | GoType::BorrowHandle(name) => {
+                // Handle types (ending with -handle) should use private identifier for lowercase first letter
+                let id = if name.ends_with("-handle") {
+                    GoIdentifier::private(name)
+                } else {
+                    GoIdentifier::public(name)
+                };
                 id.format_into(tokens)
             }
             GoType::Nothing => (),
