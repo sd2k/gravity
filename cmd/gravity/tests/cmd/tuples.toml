@@ -1,0 +1,2 @@
+bin.name = "gravity"
+args = "--world tuples ../../target/wasm32-unknown-unknown/release/example_tuples.wasm"
