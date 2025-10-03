@@ -21,6 +21,8 @@ func NewInstructionsFactory(
 ) (*InstructionsFactory, error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
 
+	// Instantiate import host modules
+
 	// Compiling the module takes a LONG time, so we want to do it once and hold
 	// onto it with the Runtime
 	module, err := wazeroRuntime.CompileModule(ctx, wasmFileInstructions)
@@ -86,7 +88,10 @@ func (i *InstructionsInstance) S8Roundtrip(
 	val int8,
 ) int8 {
 	arg0 := val
+	// GetArg { nth: 0 }
+	// I32FromS8
 	value0 := api.EncodeI32(int32(arg0))
+	// CallWasm { name: "s8-roundtrip", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("s8-roundtrip").Call(ctx, uint64(value0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -94,7 +99,9 @@ func (i *InstructionsInstance) S8Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// S8FromI32
 	result2 := int8(api.DecodeI32(results1))
+	// Return { amt: 1, func: Function { name: "s8-roundtrip", kind: Freestanding, params: [("val", S8)], result: Some(S8), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -103,7 +110,10 @@ func (i *InstructionsInstance) U8Roundtrip(
 	val uint8,
 ) uint8 {
 	arg0 := val
+	// GetArg { nth: 0 }
+	// I32FromU8
 	value0 := api.EncodeI32(int32(arg0))
+	// CallWasm { name: "u8-roundtrip", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("u8-roundtrip").Call(ctx, uint64(value0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -111,7 +121,9 @@ func (i *InstructionsInstance) U8Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// U8FromI32
 	result2 := uint8(api.DecodeU32(results1))
+	// Return { amt: 1, func: Function { name: "u8-roundtrip", kind: Freestanding, params: [("val", U8)], result: Some(U8), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -120,7 +132,10 @@ func (i *InstructionsInstance) S16Roundtrip(
 	val int16,
 ) int16 {
 	arg0 := val
+	// GetArg { nth: 0 }
+	// I32FromS16
 	value0 := api.EncodeI32(int32(arg0))
+	// CallWasm { name: "s16-roundtrip", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("s16-roundtrip").Call(ctx, uint64(value0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -128,7 +143,9 @@ func (i *InstructionsInstance) S16Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// S16FromI32
 	result2 := int16(api.DecodeI32(results1))
+	// Return { amt: 1, func: Function { name: "s16-roundtrip", kind: Freestanding, params: [("val", S16)], result: Some(S16), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -137,7 +154,10 @@ func (i *InstructionsInstance) U16Roundtrip(
 	val uint16,
 ) uint16 {
 	arg0 := val
+	// GetArg { nth: 0 }
+	// I32FromU16
 	value0 := api.EncodeI32(int32(arg0))
+	// CallWasm { name: "u16-roundtrip", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("u16-roundtrip").Call(ctx, uint64(value0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -145,7 +165,9 @@ func (i *InstructionsInstance) U16Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// U16FromI32
 	result2 := uint16(api.DecodeU32(results1))
+	// Return { amt: 1, func: Function { name: "u16-roundtrip", kind: Freestanding, params: [("val", U16)], result: Some(U16), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -154,7 +176,10 @@ func (i *InstructionsInstance) S32Roundtrip(
 	val int32,
 ) int32 {
 	arg0 := val
+	// GetArg { nth: 0 }
+	// I32FromS32
 	value0 := api.EncodeI32(arg0)
+	// CallWasm { name: "s32-roundtrip", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("s32-roundtrip").Call(ctx, uint64(value0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -162,7 +187,9 @@ func (i *InstructionsInstance) S32Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// S32FromI32
 	result2 := api.DecodeI32(results1)
+	// Return { amt: 1, func: Function { name: "s32-roundtrip", kind: Freestanding, params: [("val", S32)], result: Some(S32), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -171,7 +198,10 @@ func (i *InstructionsInstance) U32Roundtrip(
 	val uint32,
 ) uint32 {
 	arg0 := val
+	// GetArg { nth: 0 }
+	// I32FromU32
 	result0 := api.EncodeU32(arg0)
+	// CallWasm { name: "u32-roundtrip", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("u32-roundtrip").Call(ctx, uint64(result0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -179,7 +209,9 @@ func (i *InstructionsInstance) U32Roundtrip(
 	}
 
 	results1 := raw1[0]
-	result2 := api.DecodeU32(results1)
+	// U32FromI32
+	result2 := api.DecodeU32(uint64(results1))
+	// Return { amt: 1, func: Function { name: "u32-roundtrip", kind: Freestanding, params: [("val", U32)], result: Some(U32), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -188,7 +220,10 @@ func (i *InstructionsInstance) F32Roundtrip(
 	val float32,
 ) float32 {
 	arg0 := val
-	result0 := api.EncodeF32(arg0)
+	// GetArg { nth: 0 }
+	// CoreF32FromF32
+	result0 := api.EncodeF32(float32(arg0))
+	// CallWasm { name: "f32-roundtrip", sig: WasmSignature { params: [F32], results: [F32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("f32-roundtrip").Call(ctx, uint64(result0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -196,7 +231,9 @@ func (i *InstructionsInstance) F32Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// F32FromCoreF32
 	result2 := api.DecodeF32(results1)
+	// Return { amt: 1, func: Function { name: "f32-roundtrip", kind: Freestanding, params: [("val", F32)], result: Some(F32), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
@@ -205,7 +242,10 @@ func (i *InstructionsInstance) F64Roundtrip(
 	val float64,
 ) float64 {
 	arg0 := val
-	result0 := api.EncodeF64(arg0)
+	// GetArg { nth: 0 }
+	// CoreF64FromF64
+	result0 := api.EncodeF64(float64(arg0))
+	// CallWasm { name: "f64-roundtrip", sig: WasmSignature { params: [F64], results: [F64], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("f64-roundtrip").Call(ctx, uint64(result0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err1 != nil {
@@ -213,7 +253,9 @@ func (i *InstructionsInstance) F64Roundtrip(
 	}
 
 	results1 := raw1[0]
+	// F64FromCoreF64
 	result2 := api.DecodeF64(results1)
+	// Return { amt: 1, func: Function { name: "f64-roundtrip", kind: Freestanding, params: [("val", F64)], result: Some(F64), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 
