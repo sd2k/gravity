@@ -30,7 +30,7 @@ impl<'a> GoIdentifier<'a> {
     }
 
     /// Creates a new local identifier.
-    pub fn local<'b: 'a>(name: &'a str) -> Self {
+    pub fn local(name: &'a str) -> Self {
         Self::Local { name }
     }
 
