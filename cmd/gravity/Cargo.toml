@@ -31,5 +31,6 @@ wit-bindgen-core = "=0.42.1"
 wit-component = "=0.230.0"
 
 [dev-dependencies]
-trycmd = "0.15.10"
+# Cutting out `filesystem` feature
+trycmd = { version = "=0.15.10", default-features = false, features = ["color-auto", "diff"] }
 wit-bindgen = "=0.42.1"
