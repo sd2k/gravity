@@ -45,7 +45,7 @@ pub enum GoType {
     /// Slice/array of another type
     Slice(Box<GoType>),
     /// Multi-return type (for functions returning arbitrary multiple values)
-    // MultiReturn(Vec<GoType>),
+    MultiReturn(Vec<GoType>),
     /// User-defined type (records, enums, type aliases)
     UserDefined(String),
     /// Represents no value/void
@@ -123,6 +123,9 @@ impl GoType {
 
             // A pointer probably needs cleanup, not sure?
             GoType::Pointer(_) => true,
+
+            // Multi-return types need cleanup if their inner types do
+            GoType::MultiReturn(inner) => inner.iter().any(|t| t.needs_cleanup()),
         }
     }
 }
@@ -160,9 +163,24 @@ impl FormatInto<Go> for &GoType {
                 tokens.append(static_literal("[]"));
                 typ.as_ref().format_into(tokens);
             }
-            // GoType::MultiReturn(typs) => {
-            //     tokens.append(quote!($(for typ in typs join (, ) => $typ)))
-            // }
+            GoType::MultiReturn(typs) => {
+                tokens.append(static_literal("struct{"));
+                if let Some((last, typs)) = typs.split_last() {
+                    for (i, typ) in typs.iter().enumerate() {
+                        let field = GoIdentifier::public(format!("f-{i}"));
+                        field.format_into(tokens);
+                        tokens.space();
+                        typ.format_into(tokens);
+                        tokens.append(static_literal(";"));
+                        tokens.space();
+                    }
+                    let field = GoIdentifier::public(format!("f-{}", typs.len()));
+                    field.format_into(tokens);
+                    tokens.space();
+                    tokens.append(last);
+                }
+                tokens.append(static_literal("}"));
+            }
             GoType::Pointer(typ) => {
                 tokens.append(static_literal("*"));
                 typ.as_ref().format_into(tokens);

@@ -1,0 +1,13 @@
+package arcjet:tuples;
+
+interface types {
+  type custom-tuple = tuple<u32, f64, string>;
+}
+
+world tuples {
+  import types;
+  use types.{custom-tuple};
+
+  export custom-tuple-func: func(t: custom-tuple) -> custom-tuple;
+  export anonymous-tuple-func: func(t: tuple<u32, f64, string>) -> tuple<u32, f64, string>;
+}
