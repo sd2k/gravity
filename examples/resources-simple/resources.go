@@ -122,11 +122,11 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str1 := string(buf1)
-		// CallInterface { func: Function { name: "[constructor]fooer", kind: Constructor(Id { idx: 0 }), params: [("x", U32), ("y", String)], result: Some(Id(Id { idx: 1 })), docs: Docs { contents: None }, stability: Unknown }, async_: false }
+		// CallInterface { func: Function { name: "[constructor]fooer", kind: Constructor(Id { idx: 0 }), params: [("x", U32), ("y", String)], result: Some(Id(Id { idx: 4 })), docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		value2 := iface.NewFooer(ctx, result0, str1)
-		// HandleLower { handle: Own(Id { idx: 0 }), name: "fooer", ty: Id { idx: 1 } }
+		// HandleLower { handle: Own(Id { idx: 0 }), name: "fooer", ty: Id { idx: 4 } }
 		converted3 := uint32(ifaceFooerResourceTable.Store(value2))
-		// Return { amt: 1, func: Function { name: "[constructor]fooer", kind: Constructor(Id { idx: 0 }), params: [("x", U32), ("y", String)], result: Some(Id(Id { idx: 1 })), docs: Docs { contents: None }, stability: Unknown } }
+		// Return { amt: 1, func: Function { name: "[constructor]fooer", kind: Constructor(Id { idx: 0 }), params: [("x", U32), ("y", String)], result: Some(Id(Id { idx: 4 })), docs: Docs { contents: None }, stability: Unknown } }
 		return converted3
 	}).
 	Export("[constructor]fooer").
@@ -137,9 +137,9 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		arg0 uint32,
 	) uint32{
 		// GetArg { nth: 0 }
-		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 2 } }
+		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 1 } }
 		converted0 := ifaceFooerHandle(arg0)
-		// CallInterface { func: Function { name: "[method]fooer.get-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 }))], result: Some(U32), docs: Docs { contents: None }, stability: Unknown }, async_: false }
+		// CallInterface { func: Function { name: "[method]fooer.get-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 }))], result: Some(U32), docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		resource1, ok1 := ifaceFooerResourceTable.get(converted0)
 		if !ok1 {
 			panic("invalid resource handle")
@@ -147,7 +147,7 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		value1 := resource1.GetX(ctx)
 		// I32FromU32
 		result2 := value1
-		// Return { amt: 1, func: Function { name: "[method]fooer.get-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 }))], result: Some(U32), docs: Docs { contents: None }, stability: Unknown } }
+		// Return { amt: 1, func: Function { name: "[method]fooer.get-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 }))], result: Some(U32), docs: Docs { contents: None }, stability: Unknown } }
 		return result2
 	}).
 	Export("[method]fooer.get-x").
@@ -159,18 +159,18 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		arg1 uint32,
 	) {
 		// GetArg { nth: 0 }
-		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 2 } }
+		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 1 } }
 		converted0 := ifaceFooerHandle(arg0)
 		// GetArg { nth: 1 }
 		// U32FromI32
 		result1 := api.DecodeU32(uint64(arg1))
-		// CallInterface { func: Function { name: "[method]fooer.set-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 })), ("x", U32)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
+		// CallInterface { func: Function { name: "[method]fooer.set-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 })), ("x", U32)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		resource2, ok2 := ifaceFooerResourceTable.get(converted0)
 		if !ok2 {
 			panic("invalid resource handle")
 		}
 		resource2.SetX(ctx, result1)
-		// Return { amt: 0, func: Function { name: "[method]fooer.set-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 })), ("x", U32)], result: None, docs: Docs { contents: None }, stability: Unknown } }
+		// Return { amt: 0, func: Function { name: "[method]fooer.set-x", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 })), ("x", U32)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("[method]fooer.set-x").
 	NewFunctionBuilder().
@@ -181,9 +181,9 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		arg1 uint32,
 	) {
 		// GetArg { nth: 0 }
-		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 2 } }
+		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 1 } }
 		converted0 := ifaceFooerHandle(arg0)
-		// CallInterface { func: Function { name: "[method]fooer.get-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 }))], result: Some(String), docs: Docs { contents: None }, stability: Unknown }, async_: false }
+		// CallInterface { func: Function { name: "[method]fooer.get-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 }))], result: Some(String), docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		resource1, ok1 := ifaceFooerResourceTable.get(converted0)
 		if !ok1 {
 			panic("invalid resource handle")
@@ -201,7 +201,7 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		mod.Memory().WriteUint32Le(uint32(arg1+4), uint32(len2))
 		// PointerStore { offset: 0 }
 		mod.Memory().WriteUint32Le(uint32(arg1+0), uint32(ptr2))
-		// Return { amt: 0, func: Function { name: "[method]fooer.get-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 }))], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
+		// Return { amt: 0, func: Function { name: "[method]fooer.get-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 }))], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("[method]fooer.get-y").
 	NewFunctionBuilder().
@@ -213,7 +213,7 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		arg2 uint32,
 	) {
 		// GetArg { nth: 0 }
-		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 2 } }
+		// HandleLift { handle: Borrow(Id { idx: 0 }), name: "fooer", ty: Id { idx: 1 } }
 		converted0 := ifaceFooerHandle(arg0)
 		// GetArg { nth: 1 }
 		// GetArg { nth: 2 }
@@ -223,13 +223,13 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 			panic(errors.New("failed to read bytes from memory"))
 		}
 		str1 := string(buf1)
-		// CallInterface { func: Function { name: "[method]fooer.set-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 })), ("y", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
+		// CallInterface { func: Function { name: "[method]fooer.set-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 })), ("y", String)], result: None, docs: Docs { contents: None }, stability: Unknown }, async_: false }
 		resource2, ok2 := ifaceFooerResourceTable.get(converted0)
 		if !ok2 {
 			panic("invalid resource handle")
 		}
 		resource2.SetY(ctx, str1)
-		// Return { amt: 0, func: Function { name: "[method]fooer.set-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 2 })), ("y", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
+		// Return { amt: 0, func: Function { name: "[method]fooer.set-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 })), ("y", String)], result: None, docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("[method]fooer.set-y").
 	NewFunctionBuilder().
@@ -321,7 +321,7 @@ func (i *ResourcesInstance[TIfaceFooerValue, PTIfaceFooer]) UseFooer(
 ) {
 	arg0 := foo
 	// GetArg { nth: 0 }
-	// HandleLower { handle: Borrow(Id { idx: 3 }), name: "fooer", ty: Id { idx: 4 } }
+	// HandleLower { handle: Borrow(Id { idx: 2 }), name: "fooer", ty: Id { idx: 3 } }
 	converted0 := uint32(arg0)
 	// CallWasm { name: "use-fooer", sig: WasmSignature { params: [I32], results: [], indirect_params: false, retptr: false } }
 	_, err1 := i.module.ExportedFunction("use-fooer").Call(ctx, uint64(converted0))
@@ -330,7 +330,7 @@ func (i *ResourcesInstance[TIfaceFooerValue, PTIfaceFooer]) UseFooer(
 		panic(err1)
 	}
 
-	// Return { amt: 0, func: Function { name: "use-fooer", kind: Freestanding, params: [("foo", Id(Id { idx: 4 }))], result: None, docs: Docs { contents: None }, stability: Unknown } }
+	// Return { amt: 0, func: Function { name: "use-fooer", kind: Freestanding, params: [("foo", Id(Id { idx: 3 }))], result: None, docs: Docs { contents: None }, stability: Unknown } }
 }
 
 func (i *ResourcesInstance[TIfaceFooerValue, PTIfaceFooer]) UseFooerReturnNew(
@@ -339,7 +339,7 @@ func (i *ResourcesInstance[TIfaceFooerValue, PTIfaceFooer]) UseFooerReturnNew(
 ) ifaceFooerHandle {
 	arg0 := foo
 	// GetArg { nth: 0 }
-	// HandleLower { handle: Borrow(Id { idx: 3 }), name: "fooer", ty: Id { idx: 4 } }
+	// HandleLower { handle: Borrow(Id { idx: 2 }), name: "fooer", ty: Id { idx: 3 } }
 	converted0 := uint32(arg0)
 	// CallWasm { name: "use-fooer-return-new", sig: WasmSignature { params: [I32], results: [I32], indirect_params: false, retptr: false } }
 	raw1, err1 := i.module.ExportedFunction("use-fooer-return-new").Call(ctx, uint64(converted0))
@@ -349,8 +349,8 @@ func (i *ResourcesInstance[TIfaceFooerValue, PTIfaceFooer]) UseFooerReturnNew(
 	}
 
 	results1 := raw1[0]
-	// HandleLift { handle: Own(Id { idx: 3 }), name: "fooer", ty: Id { idx: 5 } }
+	// HandleLift { handle: Own(Id { idx: 2 }), name: "fooer", ty: Id { idx: 5 } }
 	converted2 := ifaceFooerHandle(results1)
-	// Return { amt: 1, func: Function { name: "use-fooer-return-new", kind: Freestanding, params: [("foo", Id(Id { idx: 4 }))], result: Some(Id(Id { idx: 5 })), docs: Docs { contents: None }, stability: Unknown } }
+	// Return { amt: 1, func: Function { name: "use-fooer-return-new", kind: Freestanding, params: [("foo", Id(Id { idx: 3 }))], result: Some(Id(Id { idx: 5 })), docs: Docs { contents: None }, stability: Unknown } }
 	return converted2
 }

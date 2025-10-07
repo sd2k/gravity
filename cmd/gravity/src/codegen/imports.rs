@@ -17,7 +17,7 @@ use crate::{
             Parameter, TypeDefinition, WitReturn,
         },
     },
-    go::{GoIdentifier, GoImports, GoResult, GoType, comment},
+    go::{GoDoc, GoIdentifier, GoImports, GoResult, GoType, comment},
     resolve_type, resolve_wasm_type,
 };
 
@@ -153,6 +153,7 @@ impl<'a> ImportAnalyzer<'a> {
 
         AnalyzedInterface {
             name: interface_name.clone(),
+            docs: GoDoc::from(interface.docs.contents.clone()),
             methods,
             types,
             constructor_param_name: GoIdentifier::private(interface_name),
@@ -179,6 +180,7 @@ impl<'a> ImportAnalyzer<'a> {
 
         InterfaceMethod {
             name: func.name.clone(),
+            docs: GoDoc::from(func.docs.contents.clone()),
             go_method_name: GoIdentifier::from_resource_function(&func.name),
             parameters,
             return_type,
@@ -208,8 +210,10 @@ impl<'a> ImportAnalyzer<'a> {
     ///
     /// TODO: we should probably instead resolve and return type and dedup elsewhere.
     fn analyze_type_definition(&self, type_def: &TypeDef) -> Option<TypeDefinition> {
+        let docs = GoDoc::from(type_def.docs.contents.clone());
         Some(match &type_def.kind {
             TypeDefKind::Record(record) => TypeDefinition::Record {
+                docs,
                 fields: record
                     .fields
                     .iter()
@@ -217,16 +221,23 @@ impl<'a> ImportAnalyzer<'a> {
                         (
                             GoIdentifier::public(&field.name),
                             resolve_type(&field.ty, self.resolve),
+                            field.docs.contents.clone().into(),
                         )
                     })
                     .collect(),
             },
             TypeDefKind::Enum(enum_def) => TypeDefinition::Enum {
-                cases: enum_def.cases.iter().map(|c| c.name.clone()).collect(),
+                docs,
+                cases: enum_def
+                    .cases
+                    .iter()
+                    .map(|c| (c.name.clone(), c.docs.contents.clone().into()))
+                    .collect(),
             },
             TypeDefKind::Variant(variant) => {
                 let interface_name = type_def.name.clone().expect("variant should have a name");
                 TypeDefinition::Variant {
+                    docs,
                     interface_function_name: GoIdentifier::private(format!(
                         "is-{}",
                         interface_name,
@@ -239,6 +250,7 @@ impl<'a> ImportAnalyzer<'a> {
                                 // TODO(bsull): prefix these with the interface name.
                                 GoIdentifier::public(format!("{}-{}", interface_name, case.name)),
                                 case.ty.as_ref().map(|t| resolve_type(t, self.resolve)),
+                                case.docs.contents.clone().into(),
                             )
                         })
                         .collect(),
@@ -249,6 +261,7 @@ impl<'a> ImportAnalyzer<'a> {
                 return None;
             }
             TypeDefKind::Type(Type::String) => TypeDefinition::Alias {
+                docs,
                 target: GoType::String,
             },
             TypeDefKind::Type(Type::Bool) => todo!("TODO(#4): generate bool type alias"),
@@ -272,12 +285,14 @@ impl<'a> ImportAnalyzer<'a> {
             TypeDefKind::Option(_) => todo!("TODO(#4): generate option type definition"),
             TypeDefKind::Result(_) => todo!("TODO(#4): generate result type definition"),
             TypeDefKind::List(ty) => TypeDefinition::Alias {
+                docs,
                 target: GoType::Slice(Box::new(resolve_type(ty, self.resolve))),
             },
             TypeDefKind::Future(_) => todo!("TODO(#4): generate future type definition"),
             TypeDefKind::Stream(_) => todo!("TODO(#4): generate stream type definition"),
             TypeDefKind::Flags(_) => todo!("TODO(#4):generate flags type definition"),
             TypeDefKind::Tuple(tuple) => TypeDefinition::Record {
+                docs,
                 fields: tuple
                     .types
                     .iter()
@@ -286,6 +301,7 @@ impl<'a> ImportAnalyzer<'a> {
                         (
                             GoIdentifier::public(format!("f-{i}")),
                             resolve_type(t, self.resolve),
+                            GoDoc::default(),
                         )
                     })
                     .collect(),
@@ -321,6 +337,7 @@ impl<'a> ImportAnalyzer<'a> {
         AnalyzedFunction {
             name: func.name.clone(),
             go_name: GoIdentifier::public(&func.name),
+            docs: GoDoc::from(func.docs.contents.clone()),
             parameters,
             return_type,
         }
@@ -687,6 +704,7 @@ impl<'a> ImportCodeGenerator<'a> {
 
             quote_in! { *tokens =>
                 $['\n']
+                $(&interface.docs)
                 type $(&interface.go_interface_name) interface {
                     $(for method in methods join ($['\r']) => $method)
                 }
@@ -695,6 +713,7 @@ impl<'a> ImportCodeGenerator<'a> {
             // Generate generic interface with type parameters
             quote_in! { *tokens =>
                 $['\n']
+                $(&interface.docs)
                 type $(&interface.go_interface_name)[$(for (value_param, pointer_param, pointer_iface) in &resource_type_params join (, ) => $value_param any, $pointer_param $pointer_iface[$value_param])] interface {
                     $(for method in methods join ($['\r']) => $method)
                 }
@@ -755,6 +774,7 @@ impl<'a> ImportCodeGenerator<'a> {
             .unwrap_or(GoResult::Empty);
 
         quote! {
+            $(&method.docs)
             $(&method.go_method_name)(
                 ctx $(&self.go_imports.context),
                 $(for param in &method.parameters join ($['\r']) => $(&param.name) $(&param.go_type),)
@@ -764,30 +784,35 @@ impl<'a> ImportCodeGenerator<'a> {
 
     fn generate_type_definition(&self, typ: &AnalyzedType, tokens: &mut Tokens<Go>) {
         match &typ.definition {
-            TypeDefinition::Record { fields } => {
-                let maybe_pointer_fields = fields.iter().map(|(name, typ)| {
+            TypeDefinition::Record { docs, fields } => {
+                let maybe_pointer_fields = fields.iter().map(|(name, typ, doc)| {
                     if let GoType::ValueOrOk(inner_type) = typ {
-                        (name, GoType::Pointer(inner_type.clone()))
+                        (name, GoType::Pointer(inner_type.clone()), doc)
                     } else {
-                        (name, typ.clone())
+                        (name, typ.clone(), doc)
                     }
                 });
                 quote_in! { *tokens =>
                     $['\n']
+                    $(docs)
                     type $(&typ.go_type_name) struct {
-                        $(for (field_name, field_type) in maybe_pointer_fields join ($['\n']) =>
+                        $(for (field_name, field_type, doc) in maybe_pointer_fields join ($['\n']) =>
+                            $(doc)
                             $field_name $field_type
                         )
                     }
                 }
             }
-            TypeDefinition::Enum { cases } => {
+            TypeDefinition::Enum { docs, cases } => {
                 let enum_type = &GoIdentifier::private(&typ.name);
                 let enum_interface = &typ.go_type_name;
                 let enum_function = &GoIdentifier::private(format!("is-{}", &typ.name));
-                let variants = cases.iter().map(GoIdentifier::public);
+                let variants = cases
+                    .iter()
+                    .map(|(name, doc)| (GoIdentifier::public(name), doc));
                 quote_in! { *tokens =>
                     $['\n']
+                    $(docs)
                     type $(enum_interface) interface {
                         $(enum_function)()
                     }
@@ -797,15 +822,19 @@ impl<'a> ImportCodeGenerator<'a> {
                     func $(enum_type) $enum_function() {}
                     $['\n']
                     const (
-                        $(for name in variants join ($['\r']) => $name $enum_type = iota)
+                        $(for (name, doc) in variants join ($['\r']) => {
+                            $(doc)
+                            $name $enum_type = iota
+                        })
                     )
                     $['\n']
                 }
             }
-            TypeDefinition::Alias { target } => {
+            TypeDefinition::Alias { docs, target } => {
                 // TODO(#4): We might want a Type Definition (newtype) instead of Type Alias here
                 quote_in! { *tokens =>
                     $['\n']
+                    $(docs)
                     type $(&typ.go_type_name) = $target
                 }
             }
@@ -816,27 +845,31 @@ impl<'a> ImportCodeGenerator<'a> {
                 }
             }
             TypeDefinition::Variant {
+                docs,
                 interface_function_name,
                 cases,
             } => {
                 quote_in! { *tokens =>
                     $['\n']
+                    $(docs)
                     type $(&typ.go_type_name) interface {
                         $(interface_function_name)()
                     }
                     $['\n']
                 }
 
-                for (case_name, case_type) in cases {
+                for (case_name, case_type, case_docs) in cases {
                     if let Some(inner_type) = case_type {
                         quote_in! { *tokens =>
                             $['\n']
+                            $(case_docs)
                             type $case_name $inner_type
                             func ($case_name) $interface_function_name() {}
                         }
                     } else {
                         quote_in! { *tokens =>
                             $['\n']
+                            $(case_docs)
                             type $&case_name $&inner_type
                             func ($&case_name) $&variant_function() {}
                         }
@@ -1107,6 +1140,7 @@ mod tests {
         let generator = ImportCodeGenerator::new(&resolve, &go_imports, &analyzed, &sizes);
         let method = InterfaceMethod {
             name: "test_function".to_string(),
+            docs: Default::default(),
             go_method_name: GoIdentifier::public("TestFunction"),
             parameters: vec![Parameter {
                 name: GoIdentifier::private("input"),
@@ -1154,6 +1188,7 @@ mod tests {
         // Test U32 parameter
         let u32_method = InterfaceMethod {
             name: "test_u32".to_string(),
+            docs: Default::default(),
             go_method_name: GoIdentifier::public("TestU32"),
             parameters: vec![Parameter {
                 name: GoIdentifier::private("value"),
@@ -1389,14 +1424,14 @@ mod tests {
 
         // This should be a Record, not an Alias
         match &analyzed_definition {
-            TypeDefinition::Record { fields } => {
+            TypeDefinition::Record { fields, .. } => {
                 println!(
                     "✓ Correctly identified as Record with {} fields",
                     fields.len()
                 );
                 assert_eq!(fields.len(), 5);
             }
-            TypeDefinition::Alias { target } => {
+            TypeDefinition::Alias { target, .. } => {
                 panic!(
                     "❌ Incorrectly identified as Alias with target: {:?}",
                     target
@@ -1425,7 +1460,7 @@ mod tests {
 
         // This is the key assertion - it should be a Record, not an Alias
         match &analyzed_type.definition {
-            TypeDefinition::Record { fields } => {
+            TypeDefinition::Record { fields, .. } => {
                 println!(
                     "✓ Analysis correctly produced Record with {} fields",
                     fields.len()
@@ -1433,8 +1468,10 @@ mod tests {
                 assert_eq!(fields.len(), 5);
 
                 // Check that field names are correct
-                let field_names: Vec<String> =
-                    fields.iter().map(|(name, _)| String::from(name)).collect();
+                let field_names: Vec<String> = fields
+                    .iter()
+                    .map(|(name, _, _)| String::from(name))
+                    .collect();
                 println!("Field names: {:?}", field_names);
 
                 assert!(field_names.contains(&"Float32".to_string()));
@@ -1443,7 +1480,7 @@ mod tests {
                 assert!(field_names.contains(&"Uint64".to_string()));
                 assert!(field_names.contains(&"S".to_string()));
             }
-            TypeDefinition::Alias { target } => {
+            TypeDefinition::Alias { target, .. } => {
                 panic!(
                     "❌ Analysis incorrectly produced Alias with target: {:?}",
                     target

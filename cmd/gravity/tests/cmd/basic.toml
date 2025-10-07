@@ -1,2 +1,2 @@
 bin.name = "gravity"
-args = "--world basic ../../target/wasm32-unknown-unknown/release/example_basic.wasm"
+args = "--world basic --wit-file ../../examples/basic/wit/basic.wit ../../target/wasm32-unknown-unknown/release/example_basic.wasm"
