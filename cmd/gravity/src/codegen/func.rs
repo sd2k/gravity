@@ -7,7 +7,7 @@ use wit_bindgen_core::{
 };
 
 use crate::{
-    go::{GoIdentifier, GoResult, GoType, Operand, comment},
+    go::{GoIdentifier, GoImports, GoResult, GoType, Operand, comment},
     resolve_type, resolve_wasm_type,
 };
 
@@ -36,12 +36,13 @@ pub struct Func<'a> {
     block_storage: Vec<Tokens<Go>>,
     blocks: Vec<(Tokens<Go>, Vec<Operand>)>,
     sizes: &'a SizeAlign,
+    go_imports: &'a GoImports,
 }
 
 impl<'a> Func<'a> {
     /// Create a new exported function.
     #[allow(dead_code, reason = "halfway through refactor of func bindings")]
-    pub fn export(result: GoResult, sizes: &'a SizeAlign) -> Self {
+    pub fn export(result: GoResult, sizes: &'a SizeAlign, go_imports: &'a GoImports) -> Self {
         Self {
             direction: Direction::Export,
             args: Vec::new(),
@@ -51,11 +52,17 @@ impl<'a> Func<'a> {
             block_storage: Vec::new(),
             blocks: Vec::new(),
             sizes,
+            go_imports,
         }
     }
 
     /// Create a new exported function.
-    pub fn import(param_name: &'a GoIdentifier, result: GoResult, sizes: &'a SizeAlign) -> Self {
+    pub fn import(
+        param_name: &'a GoIdentifier,
+        result: GoResult,
+        sizes: &'a SizeAlign,
+        go_imports: &'a GoImports,
+    ) -> Self {
         Self {
             direction: Direction::Import { param_name },
             args: Vec::new(),
@@ -65,6 +72,7 @@ impl<'a> Func<'a> {
             block_storage: Vec::new(),
             blocks: Vec::new(),
             sizes,
+            go_imports,
         }
     }
 
@@ -185,20 +193,29 @@ impl Bindgen for Func<'_> {
                 // at the types and converting with proper guards in place
                 quote_in! { self.body =>
                     $['\r']
-                    $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             if $err != nil {
                                 var $default $(typ.as_ref())
                                 return $default, $err
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
+                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             if $err != nil {
                                 return $err
                             }
                         }
-                        GoResult::Anon(_) | GoResult::Empty => {
+                        GoResult::Anon(_) => {
+                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if $err != nil {
+                                panic($err)
+                            }
+                        }
+                        GoResult::Empty => {
+                            _, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if $err != nil {
                                 panic($err)
@@ -224,9 +241,15 @@ impl Bindgen for Func<'_> {
                         }()
                     })
 
-                    $ret := $raw[0]
+                    $(match &self.result {
+                        GoResult::Anon(_) => $ret := $raw[0],
+                        GoResult::Empty => (),
+                    })
                 };
-                results.push(Operand::SingleValue(ret.into()));
+                match self.result {
+                    GoResult::Empty => (),
+                    GoResult::Anon(_) => results.push(Operand::SingleValue(ret.into())),
+                }
             }
             Instruction::I32Load8U { offset } => {
                 // TODO(#58): Support additional ArchitectureSize
@@ -287,9 +310,14 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(value))
             }
             Instruction::I32FromU32 => {
-                // It seems like this isn't needed because Wazero works with Go's uint32 type
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
                 let operand = &operands[0];
-                results.push(operand.clone());
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_encode_u32)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
             }
             Instruction::U32FromI32 => {
                 let tmp = self.tmp();
@@ -297,7 +325,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint32($operand)
+                    $result := $(&self.go_imports.wazero_api_decode_u32)($operand)
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1071,18 +1099,86 @@ impl Bindgen for Func<'_> {
             Instruction::I32FromChar => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromU64 => todo!("implement instruction: {inst:?}"),
             Instruction::I64FromS64 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS32 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromU16 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS16 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromU8 => todo!("implement instruction: {inst:?}"),
-            Instruction::I32FromS8 => todo!("implement instruction: {inst:?}"),
+            Instruction::I32FromS32 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $(&self.go_imports.wazero_api_encode_i32)($operand)
+                }
+                results.push(Operand::SingleValue(value))
+            }
+            // All of these values should fit in Go's `int32` type which allows a safe cast
+            Instruction::I32FromU16
+            | Instruction::I32FromS16
+            | Instruction::I32FromU8
+            | Instruction::I32FromS8 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $(&self.go_imports.wazero_api_encode_i32)(int32($operand))
+                }
+                results.push(Operand::SingleValue(value))
+            }
             Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
             Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
-            Instruction::S8FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::U8FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::S16FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::U16FromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::S32FromI32 => todo!("implement instruction: {inst:?}"),
+            // TODO: Validate the Go cast truncates the upper bits in the I32
+            Instruction::S8FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := int8($(&self.go_imports.wazero_api_decode_i32)($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            // TODO: Validate the Go cast truncates the upper bits in the I32
+            Instruction::U8FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := uint8($(&self.go_imports.wazero_api_decode_u32)($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            // TODO: Validate the Go cast truncates the upper bits in the I32
+            Instruction::S16FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := int16($(&self.go_imports.wazero_api_decode_i32)($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            // TODO: Validate the Go cast truncates the upper bits in the I32
+            Instruction::U16FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := uint16($(&self.go_imports.wazero_api_decode_u32)($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::S32FromI32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_decode_i32)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
@@ -1113,8 +1209,8 @@ impl Bindgen for Func<'_> {
             Instruction::FutureLift { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::StreamLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::StreamLift { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::ErrorContextLower { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::ErrorContextLift { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::ErrorContextLower => todo!("implement instruction: {inst:?}"),
+            Instruction::ErrorContextLift => todo!("implement instruction: {inst:?}"),
             Instruction::AsyncTaskReturn { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::DropHandle { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::Flush { amt } => {
