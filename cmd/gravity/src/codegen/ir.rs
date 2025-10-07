@@ -1,6 +1,6 @@
 use wit_bindgen_core::wit_parser::{Function, Type};
 
-use crate::go::{GoIdentifier, GoType};
+use crate::go::{GoDoc, GoIdentifier, GoType};
 
 /// Information about a resource that is exported from a WASM module.
 /// These resources need [resource-new] and [resource-drop] host functions.
@@ -56,6 +56,8 @@ pub struct AnalyzedImports {
 pub struct AnalyzedInterface {
     /// The name of the interface.
     pub name: String,
+    /// The documentation for the interface.
+    pub docs: GoDoc,
     pub methods: Vec<InterfaceMethod>,
     pub types: Vec<AnalyzedType>,
 
@@ -79,6 +81,8 @@ pub struct AnalyzedInterface {
 pub struct InterfaceMethod {
     /// The name of the interface method.
     pub name: String,
+    /// The documentation for the interface method.
+    pub docs: GoDoc,
     /// The Go identifier of the interface method.
     ///
     /// E.g. the `Log` in `func (l *Logger) Log(ctx context.Context, message string)`
@@ -127,10 +131,16 @@ pub struct AnalyzedType {
 /// The definition of a WIT type.
 #[derive(Debug, Clone)]
 pub enum TypeDefinition {
-    /// A struct-like type with named fields
-    Record { fields: Vec<(GoIdentifier, GoType)> },
+    /// A struct-like type with named fields and optional comments.
+    Record {
+        docs: GoDoc,
+        fields: Vec<(GoIdentifier, GoType, GoDoc)>,
+    },
     /// A union-like type with multiple cases, each optionally carrying data
     Variant {
+        /// The doc comment for the variant type.
+        docs: GoDoc,
+
         /// The Go identifier to use for the interface function.
         ///
         /// E.g. the `isFoo` in `type Foo interface { isFoo() }`
@@ -140,12 +150,15 @@ pub enum TypeDefinition {
         ///
         /// The first element of each tuple is the prefixed name of the case,
         /// where the prefix is the interface name.
-        cases: Vec<(GoIdentifier, Option<GoType>)>,
+        cases: Vec<(GoIdentifier, Option<GoType>, GoDoc)>,
     },
     /// A simple enumeration with named constants
-    Enum { cases: Vec<String> },
+    Enum {
+        docs: GoDoc,
+        cases: Vec<(String, GoDoc)>,
+    },
     /// A type alias that wraps another type
-    Alias { target: GoType },
+    Alias { target: GoType, docs: GoDoc },
     /// A primitive type that doesn't need special handling
     Primitive,
 }
@@ -154,6 +167,7 @@ pub enum TypeDefinition {
 #[derive(Debug, Clone)]
 pub struct AnalyzedFunction {
     pub name: String,
+    pub docs: GoDoc,
     pub go_name: GoIdentifier,
     pub parameters: Vec<Parameter>,
     pub return_type: Option<GoType>,
