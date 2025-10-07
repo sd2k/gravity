@@ -1,0 +1,13 @@
+[package]
+name = "example-outlier"
+version = "0.0.2"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+augurs-outlier = { git = "https://github.com/grafana/augurs", branch = "rand-0.9", features = ["serde"] }
+getrandom = { version = "0.3" }
+wit-bindgen = "=0.46.0"
+wit-component = "=0.239.0"

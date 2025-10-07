@@ -67,9 +67,11 @@ pub fn resolve_type(typ: &Type, resolve: &Resolve) -> GoType {
                 TypeDefKind::Handle(_) => todo!("TODO(#5): implement resources"),
                 TypeDefKind::Flags(_) => todo!("TODO(#4): implement flag conversion"),
                 TypeDefKind::Tuple(_) => todo!("TODO(#4): implement tuple conversion"),
-                // Variants are handled as an empty interfaces in type signatures; however, that
-                // means they require runtime type reflection
-                TypeDefKind::Variant(_) => GoType::Interface,
+                TypeDefKind::Variant(_) => GoType::UserDefined(
+                    name.clone()
+                        .clone()
+                        .expect("expected variant to have a name"),
+                ),
                 TypeDefKind::Enum(_) => {
                     GoType::UserDefined(name.clone().expect("expected enum to have a name"))
                 }

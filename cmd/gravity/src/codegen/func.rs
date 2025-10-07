@@ -3,7 +3,7 @@ use std::mem;
 use genco::prelude::*;
 use wit_bindgen_core::{
     abi::{Bindgen, Instruction},
-    wit_parser::{Alignment, ArchitectureSize, Resolve, Result_, SizeAlign, Type},
+    wit_parser::{Alignment, ArchitectureSize, Resolve, Result_, SizeAlign, Type, TypeDefKind},
 };
 
 use crate::{
@@ -117,6 +117,11 @@ impl Bindgen for Func<'_> {
         let iter_element = "e";
         let iter_base = "base";
 
+        let payload = &format!("{:?}", inst);
+        quote_in! {
+            self.body =>
+            $(comment([payload]))
+        }
         match inst {
             Instruction::GetArg { nth } => {
                 let arg = &format!("arg{nth}");
@@ -325,7 +330,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $(&self.go_imports.wazero_api_decode_u32)($operand)
+                    $result := $(&self.go_imports.wazero_api_decode_u32)(uint64($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -625,13 +630,13 @@ impl Bindgen for Func<'_> {
                         Direction::Export => {
                             quote_in! { self.body =>
                                 $['\r']
-                                i.module.Memory().WriteByte($ptr+$offset, $byte)
+                                i.module.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                         Direction::Import { .. } => {
                             quote_in! { self.body =>
                                 $['\r']
-                                mod.Memory().WriteByte($ptr+$offset, $byte)
+                                mod.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                     }
@@ -652,7 +657,7 @@ impl Bindgen for Func<'_> {
                                     $(comment(["TODO(#8): Return an error if the return type allows it"]))
                                     panic($errors_new("invalid int8 value encountered"))
                                 }
-                                i.module.Memory().WriteByte($ptr+$offset, $byte)
+                                i.module.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                         Direction::Import { .. } => {
@@ -667,7 +672,7 @@ impl Bindgen for Func<'_> {
                                 default:
                                     panic($errors_new("invalid int8 value encountered"))
                                 }
-                                mod.Memory().WriteByte($ptr+$offset, $byte)
+                                mod.Memory().WriteByte(uint32($ptr+$offset), $byte)
                             }
                         }
                     }
@@ -682,13 +687,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le($ptr+$offset, $tag)
+                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le($ptr+$offset, $tag)
+                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
                         }
                     }
                 }
@@ -702,13 +707,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le($ptr+$offset, uint32($len))
+                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le($ptr+$offset, uint32($len))
+                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
                         }
                     }
                 }
@@ -722,13 +727,13 @@ impl Bindgen for Func<'_> {
                     Direction::Export => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le($ptr+$offset, uint32($value))
+                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le($ptr+$offset, uint32($value))
+                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
                         }
                     }
                 }
@@ -814,7 +819,6 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::MultiValue((result.into(), ok.into())));
             }
             Instruction::OptionLower {
-                payload: Type::String,
                 results: result_types,
                 ..
             } => {
@@ -822,6 +826,10 @@ impl Bindgen for Func<'_> {
                 let (mut none_block, none_results) = self.pop_block();
 
                 let tmp = self.tmp();
+
+                // If there are no result_types, then the payload will be a pointer,
+                // because that's how we represent optionals in Go.
+                let is_pointer = result_types.is_empty();
 
                 let mut vars: Tokens<Go> = Tokens::new();
                 for i in 0..result_types.len() {
@@ -851,18 +859,14 @@ impl Bindgen for Func<'_> {
                     Operand::Literal(_) => {
                         panic!("impossible: expected Operand::MultiValue but got Operand::Literal")
                     }
-                    // TODO(#7): This is a weird hack to implement `option<string>`
-                    // as arguments that currently only works for strings
-                    // because it checks the empty string as the zero value to
-                    // consider it None
                     Operand::SingleValue(value) => {
                         quote_in! { self.body =>
                             $['\r']
                             $vars
-                            if $value == "" {
+                            if $(&self.go_imports.reflect_value_of)($value).IsZero() {
                                 $none_block
                             } else {
-                                variantPayload := $value
+                                variantPayload := $(if is_pointer => *)$value
                                 $some_block
                             }
                         };
@@ -880,7 +884,6 @@ impl Bindgen for Func<'_> {
                     }
                 };
             }
-            Instruction::OptionLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::RecordLower { record, .. } => {
                 let tmp = self.tmp();
                 let operand = &operands[0];
@@ -897,10 +900,59 @@ impl Bindgen for Func<'_> {
             Instruction::RecordLift { record, name, .. } => {
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
-                let fields = record
+
+                // Generate pointer conversion code for optional fields
+                let converted_operands: Vec<_> = record
                     .fields
                     .iter()
                     .zip(operands)
+                    .enumerate()
+                    .map(|(i, (field, op))| {
+                        let field_type = match resolve_type(&field.ty, resolve) {
+                            GoType::ValueOrOk(inner_type) => GoType::Pointer(inner_type),
+                            other => other,
+                        };
+                        let op_clone = op.clone();
+                        quote_in! { self.body =>
+                            $['\r']
+                        };
+                        match (&field_type, &op_clone) {
+                            (GoType::Pointer(inner_type), Operand::MultiValue((val, ok))) => {
+                                quote_in! { self.body =>
+                                    $['\r']
+                                };
+                                let ptr_var_name = format!("ptr{tmp}x{i}");
+                                quote_in! { self.body =>
+                                    $['\r']
+                                };
+                                let val_ident = GoIdentifier::local(val);
+                                let ok_ident = GoIdentifier::local(ok);
+                                let ptr_var_ident = &GoIdentifier::local(&ptr_var_name);
+                                quote_in! { self.body =>
+                                    $['\r']
+                                    var $(ptr_var_ident) *$(inner_type.as_ref())
+                                    if $(&ok_ident) {
+                                        $(ptr_var_ident) = &$(&val_ident)
+                                    } else {
+                                        $(ptr_var_ident) = nil
+                                    }
+                                };
+                                Operand::SingleValue(ptr_var_name)
+                            }
+                            _ => {
+                                quote_in! { self.body =>
+                                    $['\r']
+                                };
+                                op_clone
+                            }
+                        }
+                    })
+                    .collect();
+
+                let fields = record
+                    .fields
+                    .iter()
+                    .zip(&converted_operands)
                     .map(|(field, op)| (GoIdentifier::public(&field.name), op));
 
                 quote_in! {self.body =>
@@ -1007,9 +1059,10 @@ impl Bindgen for Func<'_> {
                 let value = &operands[0];
                 let default = &format!("default{tmp}");
 
-                for (i, typ) in result_types.iter().enumerate() {
+                for (i, _typ) in result_types.iter().enumerate() {
                     let variant_item = &format!("variant{tmp}_{i}");
-                    let typ = resolve_wasm_type(typ);
+                    // TODO: Use uint64 for all variant variables since they hold encoded WebAssembly values
+                    let typ = GoType::Uint64;
                     quote_in! { self.body =>
                         $['\r']
                         var $variant_item $typ
@@ -1017,8 +1070,60 @@ impl Bindgen for Func<'_> {
                     results.push(Operand::SingleValue(variant_item.into()));
                 }
 
+                // Find the parent variant's name by comparing case names
+                let variant_name = resolve.types.iter().find_map(|(_, type_def)| {
+                    if let TypeDefKind::Variant(v) = &type_def.kind {
+                        // Compare case names to identify the matching variant
+                        if v.cases.len() == variant.cases.len()
+                            && v.cases
+                                .iter()
+                                .zip(variant.cases.iter())
+                                .all(|(a, b)| a.name == b.name)
+                        {
+                            type_def.name.as_ref()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+
+                let variant_name = match variant_name {
+                    Some(name) => name,
+                    None => {
+                        eprintln!("Warning: Could not find variant name, using 'Unknown'");
+                        "Unknown"
+                    }
+                };
+
+                // Pre-generate all prefixed case names to handle string lifetimes
+                let case_names: Vec<String> = variant
+                    .cases
+                    .iter()
+                    .map(|case| {
+                        let capitalized_case = case
+                            .name
+                            .replace("-", " ")
+                            .split_whitespace()
+                            .map(|word| {
+                                let mut chars = word.chars();
+                                match chars.next() {
+                                    None => String::new(),
+                                    Some(first) => {
+                                        first.to_uppercase().collect::<String>() + chars.as_str()
+                                    }
+                                }
+                            })
+                            .collect::<String>();
+                        format!("{}{}", variant_name, capitalized_case)
+                    })
+                    .collect();
+
                 let mut cases: Tokens<Go> = Tokens::new();
-                for (case, (block, block_results)) in variant.cases.iter().zip(blocks) {
+                for ((_case, (block, block_results)), case_name) in
+                    variant.cases.iter().zip(blocks).zip(case_names.iter())
+                {
                     let mut assignments: Tokens<Go> = Tokens::new();
                     for (i, result) in block_results.iter().enumerate() {
                         let variant_item = &format!("variant{tmp}_{i}");
@@ -1028,7 +1133,7 @@ impl Bindgen for Func<'_> {
                         };
                     }
 
-                    let name = GoIdentifier::public(case.name.clone());
+                    let name = GoIdentifier::public(case_name.clone());
                     quote_in! { cases =>
                         $['\r']
                         case $name:
@@ -1089,16 +1194,168 @@ impl Bindgen for Func<'_> {
             Instruction::I32Load8S { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I32Load16U { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I32Load16S { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::I64Load { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F32Load { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F64Load { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::I64Load { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tmp = self.tmp();
+                let value = &format!("value{tmp}");
+                let ok = &format!("ok{tmp}");
+                let default = &format!("default{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if !$ok {
+                                var $default $(typ.as_ref())
+                                return $default, $errors_new("failed to read i64 from memory")
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if !$ok {
+                                return $errors_new("failed to read i64 from memory")
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if !$ok {
+                                panic($errors_new("failed to read i64 from memory"))
+                            }
+                        }
+                    })
+                };
+                results.push(Operand::SingleValue(value.into()));
+            }
+            Instruction::F32Load { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tmp = self.tmp();
+                let value = &format!("value{tmp}");
+                let ok = &format!("ok{tmp}");
+                let default = &format!("default{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if !$ok {
+                                var $default $(typ.as_ref())
+                                return $default, $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if !$ok {
+                                return $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if !$ok {
+                                panic($errors_new("failed to read f64 from memory"))
+                            }
+                        }
+                    })
+                };
+                results.push(Operand::SingleValue(value.into()));
+            }
+            Instruction::F64Load { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tmp = self.tmp();
+                let value = &format!("value{tmp}");
+                let ok = &format!("ok{tmp}");
+                let default = &format!("default{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if !$ok {
+                                var $default $(typ.as_ref())
+                                return $default, $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if !$ok {
+                                return $errors_new("failed to read f64 from memory")
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if !$ok {
+                                panic($errors_new("failed to read f64 from memory"))
+                            }
+                        }
+                    })
+                };
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::I32Store16 { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I64Store { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F32Store { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::F64Store { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::F32Store { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tag = &operands[0];
+                let ptr = &operands[1];
+                match &self.direction {
+                    Direction::Export => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                        }
+                    }
+                    Direction::Import { .. } => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            mod.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                        }
+                    }
+                }
+            }
+            Instruction::F64Store { offset } => {
+                // TODO(#58): Support additional ArchitectureSize
+                let offset = offset.size_wasm32();
+                let tag = &operands[0];
+                let ptr = &operands[1];
+                match &self.direction {
+                    Direction::Export => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                        }
+                    }
+                    Direction::Import { .. } => {
+                        quote_in! { self.body =>
+                            $['\r']
+                            mod.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                        }
+                    }
+                }
+            }
             Instruction::I32FromChar => todo!("implement instruction: {inst:?}"),
-            Instruction::I64FromU64 => todo!("implement instruction: {inst:?}"),
-            Instruction::I64FromS64 => todo!("implement instruction: {inst:?}"),
+            Instruction::I64FromU64 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := int64($operand)
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
+            Instruction::I64FromS64 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := $operand
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::I32FromS32 => {
                 let tmp = self.tmp();
                 let value = format!("value{tmp}");
@@ -1123,8 +1380,26 @@ impl Bindgen for Func<'_> {
                 }
                 results.push(Operand::SingleValue(value))
             }
-            Instruction::CoreF32FromF32 => todo!("implement instruction: {inst:?}"),
-            Instruction::CoreF64FromF64 => todo!("implement instruction: {inst:?}"),
+            Instruction::CoreF32FromF32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_encode_f32)(float32($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::CoreF64FromF64 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_encode_f64)(float64($operand))
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             // TODO: Validate the Go cast truncates the upper bits in the I32
             Instruction::S8FromI32 => {
                 let tmp = self.tmp();
@@ -1180,10 +1455,37 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(result.into()));
             }
             Instruction::S64FromI64 => todo!("implement instruction: {inst:?}"),
-            Instruction::U64FromI64 => todo!("implement instruction: {inst:?}"),
+            Instruction::U64FromI64 => {
+                let tmp = self.tmp();
+                let value = format!("value{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $(&value) := uint64($operand)
+                }
+                results.push(Operand::SingleValue(value.into()));
+            }
             Instruction::CharFromI32 => todo!("implement instruction: {inst:?}"),
-            Instruction::F32FromCoreF32 => todo!("implement instruction: {inst:?}"),
-            Instruction::F64FromCoreF64 => todo!("implement instruction: {inst:?}"),
+            Instruction::F32FromCoreF32 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_decode_f32)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
+            Instruction::F64FromCoreF64 => {
+                let tmp = self.tmp();
+                let result = &format!("result{tmp}");
+                let operand = &operands[0];
+                quote_in! { self.body =>
+                    $['\r']
+                    $result := $(&self.go_imports.wazero_api_decode_f64)($operand)
+                };
+                results.push(Operand::SingleValue(result.into()));
+            }
             Instruction::TupleLower { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::TupleLift { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::FlagsLower { .. } => todo!("implement instruction: {inst:?}"),
@@ -1192,7 +1494,45 @@ impl Bindgen for Func<'_> {
                 todo!("implement instruction: {inst:?}")
             }
             Instruction::EnumLift { .. } => todo!("implement instruction: {inst:?}"),
-            Instruction::Malloc { .. } => todo!("implement instruction: {inst:?}"),
+            Instruction::Malloc {
+                realloc,
+                size,
+                align,
+            } => {
+                let tmp = self.tmp();
+                let ptr = &format!("ptr{tmp}");
+                let result = &format!("result{tmp}");
+                let err = &format!("err{tmp}");
+                let default = &format!("default{tmp}");
+                let size = size.size_wasm32();
+                let align = align.align_wasm32();
+
+                quote_in! { self.body =>
+                    $['\r']
+                    $result, $err := i.module.ExportedFunction($(quoted(*realloc))).Call(ctx, 0, 0, $align, $size)
+                    $(match &self.result {
+                        GoResult::Anon(GoType::ValueOrError(typ)) => {
+                            if $err != nil {
+                                var $default $(typ.as_ref())
+                                return $default, $err
+                            }
+                        }
+                        GoResult::Anon(GoType::Error) => {
+                            if $err != nil {
+                                return $err
+                            }
+                        }
+                        GoResult::Anon(_) | GoResult::Empty => {
+                            $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
+                            if $err != nil {
+                                panic($err)
+                            }
+                        }
+                    })
+                    $ptr := $result[0]
+                }
+                results.push(Operand::SingleValue(ptr.into()));
+            }
             Instruction::HandleLower { .. } | Instruction::HandleLift { .. } => {
                 todo!("implement resources: {inst:?}")
             }

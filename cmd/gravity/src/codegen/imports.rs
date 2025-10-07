@@ -4,7 +4,8 @@ use genco::prelude::*;
 use wit_bindgen_core::{
     abi::{AbiVariant, LiftLower},
     wit_parser::{
-        Function, InterfaceId, Resolve, SizeAlign, Type, TypeDefKind, TypeId, World, WorldItem,
+        Function, InterfaceId, Resolve, SizeAlign, Type, TypeDef, TypeDefKind, TypeId, World,
+        WorldItem,
     },
 };
 
@@ -140,7 +141,7 @@ impl<'a> ImportAnalyzer<'a> {
         let type_name = type_def.name.as_ref().expect("type missing name");
 
         let go_type_name = GoIdentifier::public(type_name);
-        let definition = self.analyze_type_definition(&type_def.kind);
+        let definition = self.analyze_type_definition(&type_def);
 
         definition.map(|definition| AnalyzedType {
             name: type_name.clone(),
@@ -156,8 +157,8 @@ impl<'a> ImportAnalyzer<'a> {
     /// is probably a reference to an imported type that we have already analyzed.
     ///
     /// TODO: we should probably instead resolve and return type and dedup elsewhere.
-    fn analyze_type_definition(&self, kind: &TypeDefKind) -> Option<TypeDefinition> {
-        Some(match kind {
+    fn analyze_type_definition(&self, type_def: &TypeDef) -> Option<TypeDefinition> {
+        Some(match &type_def.kind {
             TypeDefKind::Record(record) => TypeDefinition::Record {
                 fields: record
                     .fields
@@ -173,18 +174,26 @@ impl<'a> ImportAnalyzer<'a> {
             TypeDefKind::Enum(enum_def) => TypeDefinition::Enum {
                 cases: enum_def.cases.iter().map(|c| c.name.clone()).collect(),
             },
-            TypeDefKind::Variant(variant) => TypeDefinition::Variant {
-                cases: variant
-                    .cases
-                    .iter()
-                    .map(|case| {
-                        (
-                            case.name.clone(),
-                            case.ty.as_ref().map(|t| resolve_type(t, self.resolve)),
-                        )
-                    })
-                    .collect(),
-            },
+            TypeDefKind::Variant(variant) => {
+                let interface_name = type_def.name.clone().expect("variant should have a name");
+                TypeDefinition::Variant {
+                    interface_function_name: GoIdentifier::private(format!(
+                        "is-{}",
+                        interface_name,
+                    )),
+                    cases: variant
+                        .cases
+                        .iter()
+                        .map(|case| {
+                            (
+                                // TODO(bsull): prefix these with the interface name.
+                                GoIdentifier::public(format!("{}-{}", interface_name, case.name)),
+                                case.ty.as_ref().map(|t| resolve_type(t, self.resolve)),
+                            )
+                        })
+                        .collect(),
+                }
+            }
             TypeDefKind::Type(Type::Id(_)) => {
                 // TODO(#4):  Only skip this if we have already generated the type
                 return None;
@@ -212,7 +221,9 @@ impl<'a> ImportAnalyzer<'a> {
             }
             TypeDefKind::Option(_) => todo!("TODO(#4): generate option type definition"),
             TypeDefKind::Result(_) => todo!("TODO(#4): generate result type definition"),
-            TypeDefKind::List(_) => todo!("TODO(#4): generate list type definition"),
+            TypeDefKind::List(ty) => TypeDefinition::Alias {
+                target: GoType::Slice(Box::new(resolve_type(ty, self.resolve))),
+            },
             TypeDefKind::Future(_) => todo!("TODO(#4): generate future type definition"),
             TypeDefKind::Stream(_) => todo!("TODO(#4): generate stream type definition"),
             TypeDefKind::Flags(_) => todo!("TODO(#4):generate flags type definition"),
@@ -357,10 +368,17 @@ impl<'a> ImportCodeGenerator<'a> {
     fn generate_type_definition(&self, typ: &AnalyzedType, tokens: &mut Tokens<Go>) {
         match &typ.definition {
             TypeDefinition::Record { fields } => {
+                let maybe_pointer_fields = fields.iter().map(|(name, typ)| {
+                    if let GoType::ValueOrOk(inner_type) = typ {
+                        (name, GoType::Pointer(inner_type.clone()))
+                    } else {
+                        (name, typ.clone())
+                    }
+                });
                 quote_in! { *tokens =>
                     $['\n']
                     type $(&typ.go_type_name) struct {
-                        $(for (field_name, field_type) in fields join ($['\n']) =>
+                        $(for (field_name, field_type) in maybe_pointer_fields join ($['\n']) =>
                             $field_name $field_type
                         )
                     }
@@ -400,10 +418,32 @@ impl<'a> ImportCodeGenerator<'a> {
                     // Primitive type: $(typ.name)
                 }
             }
-            TypeDefinition::Variant { .. } => {
+            TypeDefinition::Variant {
+                interface_function_name,
+                cases,
+            } => {
                 quote_in! { *tokens =>
                     $['\n']
-                    // Variant type: $(typ.name) (TODO: implement)
+                    type $(&typ.go_type_name) interface {
+                        $(interface_function_name)()
+                    }
+                    $['\n']
+                }
+
+                for (case_name, case_type) in cases {
+                    if let Some(inner_type) = case_type {
+                        quote_in! { *tokens =>
+                            $['\n']
+                            type $case_name $inner_type
+                            func ($case_name) $interface_function_name() {}
+                        }
+                    } else {
+                        quote_in! { *tokens =>
+                            $['\n']
+                            type $&case_name $&inner_type
+                            func ($&case_name) $&variant_function() {}
+                        }
+                    }
                 }
             }
         }
@@ -774,7 +814,7 @@ mod tests {
 
         // Test analyze_type_definition directly with the record kind
         let type_def = &resolve.types[type_id];
-        let analyzed_definition = analyzer.analyze_type_definition(&type_def.kind).unwrap();
+        let analyzed_definition = analyzer.analyze_type_definition(&type_def).unwrap();
 
         println!(
             "Direct analysis of type definition: {:?}",
@@ -992,7 +1032,7 @@ mod tests {
 
         // Test record analysis
         let record_def = &resolve.types[record_type_id];
-        let record_analysis = analyzer.analyze_type_definition(&record_def.kind).unwrap();
+        let record_analysis = analyzer.analyze_type_definition(&record_def).unwrap();
 
         match record_analysis {
             TypeDefinition::Record { .. } => {
@@ -1005,7 +1045,7 @@ mod tests {
 
         // Test alias analysis
         let alias_def = &resolve.types[alias_type_id];
-        let alias_analysis = analyzer.analyze_type_definition(&alias_def.kind).unwrap();
+        let alias_analysis = analyzer.analyze_type_definition(&alias_def).unwrap();
 
         match alias_analysis {
             TypeDefinition::Alias { .. } => {
