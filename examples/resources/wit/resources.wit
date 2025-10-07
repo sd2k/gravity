@@ -1,0 +1,54 @@
+package arcjet:resources;
+
+// First interface with foo and bar resources
+interface types-a {
+  resource foo {
+    constructor(x: u32);
+    get-x: func() -> u32;
+    set-x: func(n: u32);
+  }
+
+  resource bar {
+    constructor(value: string);
+    get-value: func() -> string;
+    append: func(s: string);
+  }
+
+  // Function that takes a host-provided resource and uses it
+  // (import side: host provides foo, guest consumes it)
+  double-foo-x: func(f: borrow<foo>) -> u32;
+
+  // Function that creates and returns a guest resource
+  // (export side: guest creates bar, host consumes it)
+  make-bar: func(value: string) -> bar;
+}
+
+// Second interface with foo (name clash!) and baz resources
+interface types-b {
+  resource foo {
+    constructor(y: string);
+    get-y: func() -> string;
+    set-y: func(s: string);
+  }
+
+  resource baz {
+    constructor(count: u32);
+    increment: func();
+    get-count: func() -> u32;
+  }
+
+  // Function that takes a host-provided resource and uses it
+  // (import side: host provides baz, guest consumes it)
+  triple-baz-count: func(b: borrow<baz>) -> u32;
+
+  // Function that creates and returns a guest resource
+  // (export side: guest creates foo, host consumes it)
+  make-foo: func(y: string) -> foo;
+}
+
+world resources {
+  import types-a;
+  import types-b;
+  export types-a;
+  export types-b;
+}

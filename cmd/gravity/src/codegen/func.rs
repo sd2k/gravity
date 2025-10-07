@@ -3,7 +3,9 @@ use std::mem;
 use genco::{prelude::*, tokens::static_literal};
 use wit_bindgen_core::{
     abi::{Bindgen, Instruction},
-    wit_parser::{Alignment, ArchitectureSize, Resolve, Result_, SizeAlign, Type, TypeDefKind},
+    wit_parser::{
+        Alignment, ArchitectureSize, Handle, Resolve, Result_, SizeAlign, Type, TypeDefKind,
+    },
 };
 
 use crate::{
@@ -15,16 +17,33 @@ use crate::{
 ///
 /// Functions in the Component Model can be imported into a world or
 /// exported from a world.
+
+/// Context for resource handling in imported functions
+#[derive(Clone)]
+struct ResourceContext {
+    /// Interface name (e.g., "types-a")
+    interface_name: String,
+    /// Resource name (e.g., "foo")
+    resource_name: String,
+    /// Resource table variable name (e.g., "typesAFooResourceTable")
+    table_var: String,
+}
+
 enum Direction<'a> {
     /// The function is imported into the world.
     Import {
         /// The name of the parameter representing the interface instance
         /// in the generated host binding function.
         param_name: &'a GoIdentifier,
+        /// Optional resource context for resource constructors and methods
+        resource_context: Option<ResourceContext>,
     },
     /// The function is exported from the world.
     #[allow(dead_code, reason = "halfway through refactor of func bindings")]
-    Export,
+    Export {
+        /// Optional resource context for resource parameters/returns
+        resource_context: Option<ResourceContext>,
+    },
 }
 
 pub struct Func<'a> {
@@ -37,6 +56,8 @@ pub struct Func<'a> {
     blocks: Vec<(Tokens<Go>, Vec<Operand>)>,
     sizes: &'a SizeAlign,
     go_imports: &'a GoImports,
+    /// Override the export name used in CallWasm instructions (for interface-qualified names)
+    export_name: Option<String>,
 }
 
 impl<'a> Func<'a> {
@@ -44,7 +65,9 @@ impl<'a> Func<'a> {
     #[allow(dead_code, reason = "halfway through refactor of func bindings")]
     pub fn export(result: GoResult, sizes: &'a SizeAlign, go_imports: &'a GoImports) -> Self {
         Self {
-            direction: Direction::Export,
+            direction: Direction::Export {
+                resource_context: None,
+            },
             args: Vec::new(),
             result,
             tmp: 0,
@@ -53,6 +76,68 @@ impl<'a> Func<'a> {
             blocks: Vec::new(),
             sizes,
             go_imports,
+            export_name: None,
+        }
+    }
+
+    /// Create a new exported function with resource context.
+    pub fn export_with_resource(
+        result: GoResult,
+        sizes: &'a SizeAlign,
+        go_imports: &'a GoImports,
+        interface_name: String,
+        resource_name: String,
+    ) -> Self {
+        let interface_pascal = interface_name
+            .split('-')
+            .map(|s| {
+                let mut c = s.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let resource_pascal = resource_name
+            .split('-')
+            .map(|s| {
+                let mut c = s.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("");
+
+        let interface_camel = {
+            let mut c = interface_pascal.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_lowercase().collect::<String>() + c.as_str(),
+            }
+        };
+
+        let table_var = format!("{}{}ResourceTable", interface_camel, resource_pascal);
+
+        Self {
+            direction: Direction::Export {
+                resource_context: Some(ResourceContext {
+                    interface_name,
+                    resource_name,
+                    table_var,
+                }),
+            },
+            args: Vec::new(),
+            result,
+            tmp: 0,
+            body: Tokens::new(),
+            block_storage: Vec::new(),
+            blocks: Vec::new(),
+            sizes,
+            go_imports,
+            export_name: None,
         }
     }
 
@@ -64,7 +149,10 @@ impl<'a> Func<'a> {
         go_imports: &'a GoImports,
     ) -> Self {
         Self {
-            direction: Direction::Import { param_name },
+            direction: Direction::Import {
+                param_name,
+                resource_context: None,
+            },
             args: Vec::new(),
             result,
             tmp: 0,
@@ -73,6 +161,38 @@ impl<'a> Func<'a> {
             blocks: Vec::new(),
             sizes,
             go_imports,
+            export_name: None,
+        }
+    }
+
+    /// Create a new imported function with resource context.
+    pub fn import_with_resource(
+        param_name: &'a GoIdentifier,
+        result: GoResult,
+        sizes: &'a SizeAlign,
+        go_imports: &'a GoImports,
+        interface_name: String,
+        resource_name: String,
+        table_var: String,
+    ) -> Self {
+        Self {
+            direction: Direction::Import {
+                param_name,
+                resource_context: Some(ResourceContext {
+                    interface_name,
+                    resource_name,
+                    table_var,
+                }),
+            },
+            args: Vec::new(),
+            result,
+            tmp: 0,
+            body: Tokens::new(),
+            block_storage: Vec::new(),
+            blocks: Vec::new(),
+            sizes,
+            go_imports,
+            export_name: None,
         }
     }
 
@@ -94,6 +214,11 @@ impl<'a> Func<'a> {
         &self.body
     }
 
+    /// Set the export name to use in CallWasm instructions (for interface-qualified names)
+    pub fn set_export_name(&mut self, name: String) {
+        self.export_name = Some(name);
+    }
+
     fn push_arg(&mut self, value: &str) {
         self.args.push(value.into())
     }
@@ -113,7 +238,7 @@ impl Bindgen for Func<'_> {
         operands: &mut Vec<Self::Operand>,
         results: &mut Vec<Self::Operand>,
     ) {
-        let errors_new = &go::import("errors", "New");
+        let errors_new = &self.go_imports.errors;
         let iter_element = "e";
         let iter_base = "base";
 
@@ -146,7 +271,7 @@ impl Bindgen for Func<'_> {
                 let realloc = &format!("realloc{tmp}");
                 let operand = &operands[0];
                 match self.direction {
-                    Direction::Export => {
+                    Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
                             $memory := i.module.Memory()
@@ -194,33 +319,35 @@ impl Bindgen for Func<'_> {
                 let ret = &format!("results{tmp}");
                 let err = &format!("err{tmp}");
                 let default = &format!("default{tmp}");
+                // Use export_name if set, otherwise use the instruction's name
+                let export_name = self.export_name.as_deref().unwrap_or(name);
                 // TODO(#17): Wrapping every argument in `uint64` is bad and we should instead be looking
                 // at the types and converting with proper guards in place
                 quote_in! { self.body =>
                     $['\r']
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
-                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            $raw, $err := i.module.ExportedFunction($(quoted(export_name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             if $err != nil {
                                 var $default $(typ.as_ref())
                                 return $default, $err
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
-                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            $raw, $err := i.module.ExportedFunction($(quoted(export_name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             if $err != nil {
                                 return $err
                             }
                         }
                         GoResult::Anon(_) => {
-                            $raw, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            $raw, $err := i.module.ExportedFunction($(quoted(export_name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if $err != nil {
                                 panic($err)
                             }
                         }
                         GoResult::Empty => {
-                            _, $err := i.module.ExportedFunction($(quoted(*name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
+                            _, $err := i.module.ExportedFunction($(quoted(export_name))).Call(ctx, $(for op in operands.iter() join (, ) => uint64($op)))
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if $err != nil {
                                 panic($err)
@@ -318,10 +445,23 @@ impl Bindgen for Func<'_> {
                 let tmp = self.tmp();
                 let result = &format!("result{tmp}");
                 let operand = &operands[0];
-                quote_in! { self.body =>
-                    $['\r']
-                    $result := $(&self.go_imports.wazero_api_encode_u32)($operand)
-                };
+                match self.direction {
+                    Direction::Import { .. } => {
+                        // For host functions (imports), just pass through the value
+                        // The value is already uint32 and doesn't need encoding
+                        quote_in! { self.body =>
+                            $['\r']
+                            $result := $operand
+                        };
+                    }
+                    Direction::Export { .. } => {
+                        // For exports, encode the value for passing to Wasm
+                        quote_in! { self.body =>
+                            $['\r']
+                            $result := $(&self.go_imports.wazero_api_encode_u32)($operand)
+                        };
+                    }
+                }
                 results.push(Operand::SingleValue(result.into()));
             }
             Instruction::U32FromI32 => {
@@ -565,7 +705,7 @@ impl Bindgen for Func<'_> {
                 }
             }
             Instruction::CallInterface { func, .. } => {
-                let ident = GoIdentifier::public(&func.name);
+                let ident = GoIdentifier::from_resource_function(&func.name);
                 let tmp = self.tmp();
                 let args = quote!($(for op in operands.iter() join (, ) => $op));
                 let returns = match &func.result {
@@ -575,23 +715,130 @@ impl Bindgen for Func<'_> {
                 let value = &format!("value{tmp}");
                 let err = &format!("err{tmp}");
                 let ok = &format!("ok{tmp}");
-                match self.direction {
+
+                // Check if this is a resource constructor or method
+                let is_constructor = func.name.starts_with("[constructor]");
+                let is_method = func.name.starts_with("[method]");
+
+                // Check if first parameter is a resource type
+                let first_param_is_resource = func.params.first().map_or(false, |(_, typ)| {
+                    if let wit_bindgen_core::wit_parser::Type::Id(id) = typ {
+                        let type_def = &resolve.types[*id];
+                        matches!(
+                            type_def.kind,
+                            wit_bindgen_core::wit_parser::TypeDefKind::Handle(_)
+                                | wit_bindgen_core::wit_parser::TypeDefKind::Resource
+                        )
+                    } else {
+                        false
+                    }
+                });
+
+                match &self.direction {
                     Direction::Export { .. } => todo!("TODO(#10): handle export direction"),
-                    Direction::Import { param_name, .. } => {
-                        quote_in! { self.body =>
-                            $['\r']
-                            $(match returns {
-                                GoType::Nothing => $param_name.$ident(ctx, $args),
-                                GoType::Bool | GoType::Uint32 | GoType::Interface | GoType::String | GoType::UserDefined(_) => $value := $param_name.$ident(ctx, $args),
-                                GoType::Error => $err := $param_name.$ident(ctx, $args),
-                                GoType::ValueOrError(_) => {
-                                    $value, $err := $param_name.$ident(ctx, $args)
+                    Direction::Import {
+                        param_name,
+                        resource_context,
+                    } => {
+                        if is_constructor && resource_context.is_some() {
+                            // Constructor: call interface method, store in table, return handle
+                            quote_in! { self.body =>
+                                $['\r']
+                                $(match returns {
+                                    GoType::OwnHandle(_) | GoType::Resource(_) => {
+                                        $value := $(*param_name).$ident(ctx, $args)
+                                    }
+                                    _ => $(comment(&["Unexpected return type for constructor"]))
+                                })
+                            }
+                        } else if is_method && resource_context.is_some() {
+                            // Method: lookup resource from table, call method on resource
+                            let ctx = resource_context.as_ref().unwrap();
+                            let table_var = &ctx.table_var;
+                            let resource_var = &format!("resource{tmp}");
+                            let ok_var = &format!("ok{tmp}");
+                            // First operand should be the handle (self parameter)
+                            let handle_operand = &operands[0];
+                            // Remaining operands are method parameters
+                            let method_args = if operands.len() > 1 {
+                                quote!($(for op in operands.iter().skip(1) join (, ) => $op))
+                            } else {
+                                quote!()
+                            };
+
+                            quote_in! { self.body =>
+                                $['\r']
+                                $resource_var, $ok_var := $table_var.get($handle_operand)
+                                if !$ok_var {
+                                    panic("invalid resource handle")
                                 }
-                                GoType::ValueOrOk(_) => {
-                                    $value, $ok := $param_name.$ident(ctx, $args)
+                                $(match returns {
+                                    GoType::Nothing => $resource_var.$(&ident)(ctx$(if !method_args.is_empty() => , $method_args)),
+                                    GoType::Bool | GoType::Uint32 | GoType::Interface | GoType::String | GoType::UserDefined(_) => $value := $resource_var.$(&ident)(ctx$(if !method_args.is_empty() => , $method_args)),
+                                    GoType::Error => $err := $resource_var.$(&ident)(ctx$(if !method_args.is_empty() => , $method_args)),
+                                    GoType::ValueOrError(_) => {
+                                        $value, $err := $resource_var.$(&ident)(ctx$(if !method_args.is_empty() => , $method_args))
+                                    }
+                                    GoType::ValueOrOk(_) => {
+                                        $value, $ok := $resource_var.$(&ident)(ctx$(if !method_args.is_empty() => , $method_args))
+                                    }
+                                    _ => $(comment(&["TODO(#9): handle return type"]))
+                                })
+                            }
+                        } else if resource_context.is_some()
+                            && !operands.is_empty()
+                            && first_param_is_resource
+                        {
+                            // Freestanding function with resource parameter: lookup resource from table
+                            let ctx = resource_context.as_ref().unwrap();
+                            let table_var = &ctx.table_var;
+                            let resource_var = &format!("resource{tmp}");
+                            let ok_var = &format!("ok{tmp}");
+                            // First operand should be the handle (resource parameter)
+                            let handle_operand = &operands[0];
+                            // Remaining operands are other parameters
+                            let remaining_args = if operands.len() > 1 {
+                                quote!($(for op in operands.iter().skip(1) join (, ) => , $op))
+                            } else {
+                                quote!()
+                            };
+
+                            quote_in! { self.body =>
+                                $['\r']
+                                $resource_var, $ok_var := $table_var.get($handle_operand)
+                                if !$ok_var {
+                                    panic("invalid resource handle")
                                 }
-                                _ => $(comment(&["TODO(#9): handle return type"]))
-                            })
+                                $(match returns {
+                                    GoType::Nothing => $(*param_name).$ident(ctx, $resource_var$remaining_args),
+                                    GoType::Bool | GoType::Uint32 | GoType::Interface | GoType::String | GoType::UserDefined(_) | GoType::OwnHandle(_) | GoType::BorrowHandle(_) | GoType::Resource(_) => $value := $(*param_name).$ident(ctx, $resource_var$remaining_args),
+                                    GoType::Error => $err := $(*param_name).$ident(ctx, $resource_var$remaining_args),
+                                    GoType::ValueOrError(_) => {
+                                        $value, $err := $(*param_name).$ident(ctx, $resource_var$remaining_args)
+                                    }
+                                    GoType::ValueOrOk(_) => {
+                                        $value, $ok := $(*param_name).$ident(ctx, $resource_var$remaining_args)
+                                    }
+                                    _ => $(comment(&["TODO(#9): handle return type"]))
+                                })
+                            }
+                        } else {
+                            // Regular interface call (not a resource constructor or method)
+                            quote_in! { self.body =>
+                                $['\r']
+                                $(match returns {
+                                    GoType::Nothing => $(*param_name).$ident(ctx, $args),
+                                    GoType::Bool | GoType::Uint32 | GoType::Interface | GoType::String | GoType::UserDefined(_) | GoType::OwnHandle(_) | GoType::BorrowHandle(_) | GoType::Resource(_) => $value := $(*param_name).$ident(ctx, $args),
+                                    GoType::Error => $err := $(*param_name).$ident(ctx, $args),
+                                    GoType::ValueOrError(_) => {
+                                        $value, $err := $(*param_name).$ident(ctx, $args)
+                                    }
+                                    GoType::ValueOrOk(_) => {
+                                        $value, $ok := $(*param_name).$ident(ctx, $args)
+                                    }
+                                    _ => $(comment(&["TODO(#9): handle return type"]))
+                                })
+                            }
                         }
                     }
                 }
@@ -601,7 +848,10 @@ impl Bindgen for Func<'_> {
                     | GoType::Uint32
                     | GoType::Interface
                     | GoType::UserDefined(_)
-                    | GoType::String => {
+                    | GoType::String
+                    | GoType::OwnHandle(_)
+                    | GoType::BorrowHandle(_)
+                    | GoType::Resource(_) => {
                         results.push(Operand::SingleValue(value.into()));
                     }
                     GoType::Error => {
@@ -627,7 +877,7 @@ impl Bindgen for Func<'_> {
                 let ptr = &operands[1];
                 if let Operand::Literal(byte) = tag {
                     match &self.direction {
-                        Direction::Export => {
+                        Direction::Export { .. } => {
                             quote_in! { self.body =>
                                 $['\r']
                                 i.module.Memory().WriteByte(uint32($ptr+$offset), $byte)
@@ -644,7 +894,7 @@ impl Bindgen for Func<'_> {
                     let tmp = self.tmp();
                     let byte = format!("byte{tmp}");
                     match &self.direction {
-                        Direction::Export => {
+                        Direction::Export { .. } => {
                             quote_in! { self.body =>
                                 $['\r']
                                 var $(&byte) uint8
@@ -684,7 +934,7 @@ impl Bindgen for Func<'_> {
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
-                    Direction::Export => {
+                    Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
                             i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
@@ -704,7 +954,7 @@ impl Bindgen for Func<'_> {
                 let len = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
-                    Direction::Export => {
+                    Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
                             i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
@@ -724,7 +974,7 @@ impl Bindgen for Func<'_> {
                 let value = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
-                    Direction::Export => {
+                    Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
                             i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
@@ -1309,7 +1559,7 @@ impl Bindgen for Func<'_> {
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
-                    Direction::Export => {
+                    Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
                             i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
@@ -1329,7 +1579,7 @@ impl Bindgen for Func<'_> {
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
-                    Direction::Export => {
+                    Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
                             i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
@@ -1606,8 +1856,83 @@ impl Bindgen for Func<'_> {
                 }
                 results.push(Operand::SingleValue(ptr.into()));
             }
-            Instruction::HandleLower { .. } | Instruction::HandleLift { .. } => {
-                todo!("implement resources: {inst:?}")
+            Instruction::HandleLower {
+                handle,
+                name: _,
+                ty: _ty,
+            } => match handle {
+                // Create an `i32` from a handle.
+                // For constructors, we need to store the resource in the table and return the handle.
+                // For other cases, just convert to uint32.
+                Handle::Own(_id) | Handle::Borrow(_id) => {
+                    let tmp = self.tmp();
+                    let converted = &format!("converted{tmp}");
+                    let operand = &operands[0];
+
+                    // Check if this is in a constructor context (we have resource_context and just called NewFoo)
+                    match &self.direction {
+                        Direction::Import {
+                            resource_context, ..
+                        } if resource_context.is_some() => {
+                            let ctx = resource_context.as_ref().unwrap();
+                            let table_var = &ctx.table_var;
+
+                            quote_in! { self.body =>
+                                $['\r']
+                                $converted := uint32($table_var.Store($operand))
+                            }
+                        }
+                        _ => {
+                            quote_in! { self.body =>
+                                $['\r']
+                                $converted := uint32($operand)
+                            }
+                        }
+                    }
+
+                    results.push(Operand::SingleValue(converted.into()));
+                }
+            },
+            Instruction::HandleLift {
+                handle,
+                name,
+                ty: _ty,
+            } => {
+                // Convert an i32 from Wasm into a resource handle.
+                // In the Component Model, the i32 is an index into the resource table.
+                // We need to get the proper resource type name (with interface prefix).
+                match handle {
+                    Handle::Own(_id) | Handle::Borrow(_id) => {
+                        let tmp = self.tmp();
+                        let converted = &format!("converted{tmp}");
+                        let operand = &operands[0];
+
+                        // Use the properly prefixed resource type name
+                        let resource_type = match &self.direction {
+                            Direction::Import {
+                                resource_context, ..
+                            }
+                            | Direction::Export {
+                                resource_context, ..
+                            } if resource_context.is_some() => {
+                                let ctx = resource_context.as_ref().unwrap();
+                                // Use kebab-case format for proper identifier conversion
+                                GoIdentifier::private(&format!(
+                                    "{}-{}-handle",
+                                    ctx.interface_name, ctx.resource_name
+                                ))
+                            }
+                            _ => GoIdentifier::public(*name),
+                        };
+
+                        quote_in! { self.body =>
+                            $['\r']
+                            $converted := $resource_type($operand)
+                        }
+
+                        results.push(Operand::SingleValue(converted.into()));
+                    }
+                }
             }
             Instruction::ListCanonLower { .. } | Instruction::ListCanonLift { .. } => {
                 unimplemented!("gravity doesn't represent lists as Canonical")

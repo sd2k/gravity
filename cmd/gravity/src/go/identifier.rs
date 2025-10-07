@@ -43,6 +43,45 @@ impl GoIdentifier {
         Self::Local { name: name.into() }
     }
 
+    /// Creates a public identifier from a resource function name.
+    ///
+    /// Resource function names in WIT have special prefixes:
+    /// - `[constructor]foo` → `NewFoo`
+    /// - `[method]foo.get-x` → `GetX`
+    /// - `[method]foo.increase-x` → `IncreaseX`
+    ///
+    /// For regular function names without these prefixes, this behaves
+    /// the same as `GoIdentifier::public()`.
+    pub fn from_resource_function<T>(name: T) -> Self
+    where
+        T: AsRef<str>,
+    {
+        let name = name.as_ref();
+
+        // Handle [constructor]resource-name
+        if let Some(resource_name) = name.strip_prefix("[constructor]") {
+            return Self::Public {
+                name: format!("new-{}", resource_name),
+            };
+        }
+
+        // Handle [method]resource-name.method-name
+        if let Some(rest) = name.strip_prefix("[method]") {
+            // Split on the first dot to separate resource name from method name
+            if let Some(dot_pos) = rest.find('.') {
+                let method_name = &rest[dot_pos + 1..];
+                return Self::Public {
+                    name: method_name.to_string(),
+                };
+            }
+        }
+
+        // For regular function names, just use public
+        Self::Public {
+            name: name.to_string(),
+        }
+    }
+
     /// Returns an iterator over the characters of the underlying name.
     ///
     /// This provides access to the raw name without case transformations.
@@ -133,5 +172,37 @@ mod tests {
         let mut tokens = Tokens::<Go>::new();
         (&id).format_into(&mut tokens);
         assert_eq!(tokens.to_string().unwrap(), "helloWorld");
+    }
+
+    #[test]
+    fn test_resource_constructor() {
+        let id = GoIdentifier::from_resource_function("[constructor]foo");
+        let mut tokens = Tokens::<Go>::new();
+        (&id).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "NewFoo");
+    }
+
+    #[test]
+    fn test_resource_method() {
+        let id = GoIdentifier::from_resource_function("[method]foo.get-x");
+        let mut tokens = Tokens::<Go>::new();
+        (&id).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "GetX");
+    }
+
+    #[test]
+    fn test_resource_method_multi_word() {
+        let id = GoIdentifier::from_resource_function("[method]foo.increase-x");
+        let mut tokens = Tokens::<Go>::new();
+        (&id).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "IncreaseX");
+    }
+
+    #[test]
+    fn test_regular_function_name() {
+        let id = GoIdentifier::from_resource_function("regular-function");
+        let mut tokens = Tokens::<Go>::new();
+        (&id).format_into(&mut tokens);
+        assert_eq!(tokens.to_string().unwrap(), "RegularFunction");
     }
 }
