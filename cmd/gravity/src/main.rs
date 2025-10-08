@@ -1408,6 +1408,7 @@ fn main() -> Result<ExitCode, ()> {
     };
 
     let context = &go::import("context", "Context");
+    let errors_new = &go::import("errors", "New");
     let wazero_new_runtime = &go::import("github.com/tetratelabs/wazero", "NewRuntime");
     let wazero_new_module_config = &go::import("github.com/tetratelabs/wazero", "NewModuleConfig");
     let wazero_runtime = &go::import("github.com/tetratelabs/wazero", "Runtime");
@@ -1647,7 +1648,7 @@ fn main() -> Result<ExitCode, ()> {
 
             $(comment(&[
                 "writeString will put a Go string into the Wasm memory following the Component",
-                "Model calling convetions, such as allocating memory with the realloc function"
+                "Model calling conventions, such as allocating memory with the realloc function"
             ]))
             func writeString(
                 ctx $context,
@@ -1666,7 +1667,7 @@ fn main() -> Result<ExitCode, ()> {
                 ptr := results[0]
                 ok := memory.Write(uint32(ptr), []byte(s))
                 if !ok {
-                    return 1, 0, err
+                    return 1, 0, $errors_new("failed to write string to wasm memory")
                 }
                 return uint64(ptr), uint64(len(s)), nil
             }
