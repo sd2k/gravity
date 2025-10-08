@@ -1408,6 +1408,7 @@ fn main() -> Result<ExitCode, ()> {
     };
 
     let context = &go::import("context", "Context");
+    let errors_new = &go::import("errors", "New");
     let wazero_new_runtime = &go::import("github.com/tetratelabs/wazero", "NewRuntime");
     let wazero_new_module_config = &go::import("github.com/tetratelabs/wazero", "NewModuleConfig");
     let wazero_runtime = &go::import("github.com/tetratelabs/wazero", "Runtime");
