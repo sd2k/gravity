@@ -34,7 +34,6 @@ impl FormatInto<Go> for Wasm<'_> {
                     })
                     .collect::<Vec<Tokens<Go>>>();
 
-                // TODO(#16): Don't use the internal bindings.out field
                 quote_in! { *tokens =>
                     var $(self.var) = []byte{
                         $(for row in hex_rows join ($['\r']) => $row)
@@ -42,7 +41,6 @@ impl FormatInto<Go> for Wasm<'_> {
                 };
             }
             WasmData::Embedded(name) => {
-                // TODO(#16): Don't use the internal bindings.out field
                 quote_in! { *tokens =>
                     import _ "embed"
 

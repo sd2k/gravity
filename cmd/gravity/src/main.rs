@@ -1468,7 +1468,7 @@ fn main() -> Result<ExitCode, ()> {
             $['\n']
             func $new_factory(
                 ctx $context,
-                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::public (
+                $(for interface_name in ifaces.iter() join ($['\r']) => $(GoIdentifier::local(interface_name)) $(GoIdentifier::public(
                     format!("i-{selected_world}-{interface_name}"),
                 )),)
             ) (*$factory, error) {
