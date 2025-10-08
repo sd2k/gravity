@@ -1647,7 +1647,7 @@ fn main() -> Result<ExitCode, ()> {
 
             $(comment(&[
                 "writeString will put a Go string into the Wasm memory following the Component",
-                "Model calling convetions, such as allocating memory with the realloc function"
+                "Model calling conventions, such as allocating memory with the realloc function"
             ]))
             func writeString(
                 ctx $context,
@@ -1666,7 +1666,7 @@ fn main() -> Result<ExitCode, ()> {
                 ptr := results[0]
                 ok := memory.Write(uint32(ptr), []byte(s))
                 if !ok {
-                    return 1, 0, err
+                    return 1, 0, $errors_new("failed to write string to wasm memory")
                 }
                 return uint64(ptr), uint64(len(s)), nil
             }
