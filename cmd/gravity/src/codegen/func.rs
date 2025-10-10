@@ -10,7 +10,7 @@ use crate::{
     go::{
         GoIdentifier, GoResult, GoType, Operand, comment,
         imports::{
-            WAZERO_API_DECODE_I32, WAZERO_API_DECODE_U32, WAZERO_API_ENCODE_I32,
+            ERRORS_NEW, WAZERO_API_DECODE_I32, WAZERO_API_DECODE_U32, WAZERO_API_ENCODE_I32,
             WAZERO_API_ENCODE_U32,
         },
     },
@@ -111,7 +111,6 @@ impl Bindgen for Func<'_> {
         operands: &mut Vec<Self::Operand>,
         results: &mut Vec<Self::Operand>,
     ) {
-        let errors_new = &go::import("errors", "New");
         let iter_element = "e";
         let iter_base = "base";
 
@@ -234,7 +233,7 @@ impl Bindgen for Func<'_> {
                                     "going on, so we panic. Also, you can't return the error from",
                                     "the `defer`"
                                 ]))
-                                panic($errors_new("failed to cleanup"))
+                                panic($ERRORS_NEW("failed to cleanup"))
                             }
                         }()
                     })
@@ -264,18 +263,18 @@ impl Bindgen for Func<'_> {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
                                 var $default $(typ.as_ref())
-                                return $default, $errors_new("failed to read byte from memory")
+                                return $default, $ERRORS_NEW("failed to read byte from memory")
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
                             if !$ok {
-                                return $errors_new("failed to read byte from memory")
+                                return $ERRORS_NEW("failed to read byte from memory")
                             }
                         }
                         GoResult::Anon(_) | GoResult::Empty => {
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if !$ok {
-                                panic($errors_new("failed to read byte from memory"))
+                                panic($ERRORS_NEW("failed to read byte from memory"))
                             }
                         }
                     })
@@ -342,18 +341,18 @@ impl Bindgen for Func<'_> {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
                                 var $default $(typ.as_ref())
-                                return $default, $errors_new("failed to read pointer from memory")
+                                return $default, $ERRORS_NEW("failed to read pointer from memory")
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
                             if !$ok {
-                                return $errors_new("failed to read pointer from memory")
+                                return $ERRORS_NEW("failed to read pointer from memory")
                             }
                         }
                         GoResult::Anon(_) | GoResult::Empty => {
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if !$ok {
-                                panic($errors_new("failed to read pointer from memory"))
+                                panic($ERRORS_NEW("failed to read pointer from memory"))
                             }
                         }
                     })
@@ -375,18 +374,18 @@ impl Bindgen for Func<'_> {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
                                 var $default $(typ.as_ref())
-                                return $default, $errors_new("failed to read length from memory")
+                                return $default, $ERRORS_NEW("failed to read length from memory")
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
                             if !$ok {
-                                return $errors_new("failed to read length from memory")
+                                return $ERRORS_NEW("failed to read length from memory")
                             }
                         }
                         GoResult::Anon(_) | GoResult::Empty => {
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if !$ok {
-                                panic($errors_new("failed to read length from memory"))
+                                panic($ERRORS_NEW("failed to read length from memory"))
                             }
                         }
                     })
@@ -408,18 +407,18 @@ impl Bindgen for Func<'_> {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
                                 var $default $(typ.as_ref())
-                                return $default, $errors_new("failed to read i32 from memory")
+                                return $default, $ERRORS_NEW("failed to read i32 from memory")
                             }
                         }
                         GoResult::Anon(GoType::Error) => {
                             if !$ok {
-                                return $errors_new("failed to read i32 from memory")
+                                return $ERRORS_NEW("failed to read i32 from memory")
                             }
                         }
                         GoResult::Anon(_) | GoResult::Empty => {
                             $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                             if !$ok {
-                                panic($errors_new("failed to read i32 from memory"))
+                                panic($ERRORS_NEW("failed to read i32 from memory"))
                             }
                         }
                     })
@@ -443,18 +442,18 @@ impl Bindgen for Func<'_> {
                                 GoResult::Anon(GoType::ValueOrError(typ)) => {
                                     if !$ok {
                                         var $default $(typ.as_ref())
-                                        return $default, $errors_new("failed to read bytes from memory")
+                                        return $default, $ERRORS_NEW("failed to read bytes from memory")
                                     }
                                 }
                                 GoResult::Anon(GoType::Error) => {
                                     if !$ok {
-                                        return $errors_new("failed to read bytes from memory")
+                                        return $ERRORS_NEW("failed to read bytes from memory")
                                     }
                                 }
                                 GoResult::Anon(_) | GoResult::Empty => {
                                     $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
                                     if !$ok {
-                                        panic($errors_new("failed to read bytes from memory"))
+                                        panic($ERRORS_NEW("failed to read bytes from memory"))
                                     }
                                 }
                             })
@@ -466,7 +465,7 @@ impl Bindgen for Func<'_> {
                             $['\r']
                             $buf, $ok := mod.Memory().Read($ptr, $len)
                             if !$ok {
-                                panic($errors_new("failed to read bytes from memory"))
+                                panic($ERRORS_NEW("failed to read bytes from memory"))
                             }
                             $str := string($buf)
                         };
@@ -505,9 +504,9 @@ impl Bindgen for Func<'_> {
                         $value = $ok_op
                     case 1:
                         $err_block
-                        $err = $errors_new($err_op)
+                        $err = $ERRORS_NEW($err_op)
                     default:
-                        $err = $errors_new("invalid variant discriminant for expected")
+                        $err = $ERRORS_NEW("invalid variant discriminant for expected")
                     }
                 };
 
@@ -539,9 +538,9 @@ impl Bindgen for Func<'_> {
                         $ok_block
                     case 1:
                         $err_block
-                        $err = $errors_new($err_op)
+                        $err = $ERRORS_NEW($err_op)
                     default:
-                        $err = $errors_new("invalid variant discriminant for expected")
+                        $err = $ERRORS_NEW("invalid variant discriminant for expected")
                     }
                 };
 
@@ -648,7 +647,7 @@ impl Bindgen for Func<'_> {
                                     $(&byte) = 1
                                 default:
                                     $(comment(["TODO(#8): Return an error if the return type allows it"]))
-                                    panic($errors_new("invalid int8 value encountered"))
+                                    panic($ERRORS_NEW("invalid int8 value encountered"))
                                 }
                                 i.module.Memory().WriteByte($ptr+$offset, $byte)
                             }
@@ -663,7 +662,7 @@ impl Bindgen for Func<'_> {
                                 case 1:
                                     $(&byte) = 1
                                 default:
-                                    panic($errors_new("invalid int8 value encountered"))
+                                    panic($ERRORS_NEW("invalid int8 value encountered"))
                                 }
                                 mod.Memory().WriteByte($ptr+$offset, $byte)
                             }
@@ -1043,14 +1042,14 @@ impl Bindgen for Func<'_> {
                             $(match &self.result {
                                 GoResult::Anon(GoType::ValueOrError(typ)) => {
                                     var $default $(typ.as_ref())
-                                    return $default, $errors_new("invalid variant type provided")
+                                    return $default, $ERRORS_NEW("invalid variant type provided")
                                 }
                                 GoResult::Anon(GoType::Error) => {
-                                    return $errors_new("invalid variant type provided")
+                                    return $ERRORS_NEW("invalid variant type provided")
                                 }
                                 GoResult::Anon(_) | GoResult::Empty => {
                                     $(comment(&["The return type doesn't contain an error so we panic if one is encountered"]))
-                                    panic($errors_new("invalid variant type provided"))
+                                    panic($ERRORS_NEW("invalid variant type provided"))
                                 }
                             })
                     }
@@ -1077,7 +1076,7 @@ impl Bindgen for Func<'_> {
                     switch $value {
                     $cases
                     default:
-                        panic($errors_new("invalid enum type provided"))
+                        panic($ERRORS_NEW("invalid enum type provided"))
                     }
                 };
 
