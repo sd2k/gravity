@@ -1,71 +1,30 @@
-use genco::lang::go::Import;
+use genco::{Tokens, lang::Go, tokens::FormatInto};
 
-/// Struct to hold Go import references
-pub struct GoImports {
-    pub context: Import,
-    pub errors_new: Import,
-    pub fmt: Import,
-    pub wazero_runtime: Import,
-    pub wazero_new_runtime: Import,
-    pub wazero_new_module_config: Import,
-    pub wazero_compiled_module: Import,
-    pub wazero_api_module: Import,
-    pub wazero_api_memory: Import,
-    pub wazero_api_encode_u32: Import,
-    pub wazero_api_decode_u32: Import,
-    pub wazero_api_encode_i32: Import,
-    pub wazero_api_decode_i32: Import,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct GoImport(&'static str, &'static str);
 
-impl Default for GoImports {
-    fn default() -> Self {
-        Self::new()
+impl FormatInto<Go> for GoImport {
+    fn format_into(self, tokens: &mut Tokens<Go>) {
+        tokens.append(genco::lang::go::import(self.0, self.1));
     }
 }
 
-impl GoImports {
-    pub fn new() -> Self {
-        Self {
-            context: genco::lang::go::import("context", "Context"),
-            errors_new: genco::lang::go::import("errors", "New"),
-            fmt: genco::lang::go::import("fmt", "Printf"),
-            wazero_runtime: genco::lang::go::import("github.com/tetratelabs/wazero", "Runtime"),
-            wazero_new_runtime: genco::lang::go::import(
-                "github.com/tetratelabs/wazero",
-                "NewRuntime",
-            ),
-            wazero_new_module_config: genco::lang::go::import(
-                "github.com/tetratelabs/wazero",
-                "NewModuleConfig",
-            ),
-            wazero_compiled_module: genco::lang::go::import(
-                "github.com/tetratelabs/wazero",
-                "CompiledModule",
-            ),
-            wazero_api_module: genco::lang::go::import(
-                "github.com/tetratelabs/wazero/api",
-                "Module",
-            ),
-            wazero_api_memory: genco::lang::go::import(
-                "github.com/tetratelabs/wazero/api",
-                "Memory",
-            ),
-            wazero_api_encode_u32: genco::lang::go::import(
-                "github.com/tetratelabs/wazero/api",
-                "EncodeU32",
-            ),
-            wazero_api_decode_u32: genco::lang::go::import(
-                "github.com/tetratelabs/wazero/api",
-                "DecodeU32",
-            ),
-            wazero_api_encode_i32: genco::lang::go::import(
-                "github.com/tetratelabs/wazero/api",
-                "EncodeI32",
-            ),
-            wazero_api_decode_i32: genco::lang::go::import(
-                "github.com/tetratelabs/wazero/api",
-                "DecodeI32",
-            ),
-        }
-    }
-}
+pub static CONTEXT_CONTEXT: GoImport = GoImport("context", "Context");
+pub static ERRORS_NEW: GoImport = GoImport("errors", "New");
+pub static FMT_PRINTF: GoImport = GoImport("fmt", "Printf");
+pub static WAZERO_RUNTIME: GoImport = GoImport("github.com/tetratelabs/wazero", "Runtime");
+pub static WAZERO_NEW_RUNTIME: GoImport = GoImport("github.com/tetratelabs/wazero", "NewRuntime");
+pub static WAZERO_NEW_MODULE_CONFIG: GoImport =
+    GoImport("github.com/tetratelabs/wazero", "NewModuleConfig");
+pub static WAZERO_COMPILED_MODULE: GoImport =
+    GoImport("github.com/tetratelabs/wazero", "CompiledModule");
+pub static WAZERO_API_MODULE: GoImport = GoImport("github.com/tetratelabs/wazero/api", "Module");
+pub static WAZERO_API_MEMORY: GoImport = GoImport("github.com/tetratelabs/wazero/api", "Memory");
+pub static WAZERO_API_ENCODE_U32: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "EncodeU32");
+pub static WAZERO_API_DECODE_U32: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "DecodeU32");
+pub static WAZERO_API_ENCODE_I32: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "EncodeI32");
+pub static WAZERO_API_DECODE_I32: GoImport =
+    GoImport("github.com/tetratelabs/wazero/api", "DecodeI32");

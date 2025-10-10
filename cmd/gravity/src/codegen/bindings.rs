@@ -11,7 +11,7 @@ use crate::{
         ir::AnalyzedImports,
         wasm::{Wasm, WasmData},
     },
-    go::{GoIdentifier, GoImports},
+    go::GoIdentifier,
 };
 
 /// The WIT bindings for a world.
@@ -24,9 +24,6 @@ pub struct Bindings<'a> {
 
     /// The identifier of the Go variable containing the WebAssembly bytes.
     raw_wasm_var: GoIdentifier,
-
-    /// The Go imports for the bindings.
-    go_imports: GoImports,
 
     /// The sizes of the architecture.
     sizes: &'a SizeAlign,
@@ -42,7 +39,6 @@ impl<'a> Bindings<'a> {
             world,
             out: Tokens::new(),
             raw_wasm_var: wasm_var,
-            go_imports: GoImports::new(),
             sizes,
         }
     }
@@ -57,8 +53,7 @@ impl<'a> Bindings<'a> {
         let analyzer = ImportAnalyzer::new(self.resolve, self.world);
         let analyzed = analyzer.analyze();
 
-        let generator =
-            ImportCodeGenerator::new(self.resolve, &self.go_imports, &analyzed, self.sizes);
+        let generator = ImportCodeGenerator::new(self.resolve, &analyzed, self.sizes);
         let import_chains = generator.import_chains();
         generator.format_into(&mut self.out);
         (analyzed, import_chains)
@@ -73,7 +68,6 @@ impl<'a> Bindings<'a> {
     ) {
         let config = FactoryConfig {
             analyzed_imports,
-            go_imports: &self.go_imports,
             import_chains,
             wasm_var_name: &self.raw_wasm_var,
         };

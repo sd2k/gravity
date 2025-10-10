@@ -7,7 +7,13 @@ use wit_bindgen_core::{
 };
 
 use crate::{
-    go::{GoIdentifier, GoImports, GoResult, GoType, Operand, comment},
+    go::{
+        GoIdentifier, GoResult, GoType, Operand, comment,
+        imports::{
+            WAZERO_API_DECODE_I32, WAZERO_API_DECODE_U32, WAZERO_API_ENCODE_I32,
+            WAZERO_API_ENCODE_U32,
+        },
+    },
     resolve_type, resolve_wasm_type,
 };
 
@@ -36,13 +42,12 @@ pub struct Func<'a> {
     block_storage: Vec<Tokens<Go>>,
     blocks: Vec<(Tokens<Go>, Vec<Operand>)>,
     sizes: &'a SizeAlign,
-    go_imports: &'a GoImports,
 }
 
 impl<'a> Func<'a> {
     /// Create a new exported function.
     #[allow(dead_code, reason = "halfway through refactor of func bindings")]
-    pub fn export(result: GoResult, sizes: &'a SizeAlign, go_imports: &'a GoImports) -> Self {
+    pub fn export(result: GoResult, sizes: &'a SizeAlign) -> Self {
         Self {
             direction: Direction::Export,
             args: Vec::new(),
@@ -52,17 +57,11 @@ impl<'a> Func<'a> {
             block_storage: Vec::new(),
             blocks: Vec::new(),
             sizes,
-            go_imports,
         }
     }
 
     /// Create a new exported function.
-    pub fn import(
-        param_name: &'a GoIdentifier,
-        result: GoResult,
-        sizes: &'a SizeAlign,
-        go_imports: &'a GoImports,
-    ) -> Self {
+    pub fn import(param_name: &'a GoIdentifier, result: GoResult, sizes: &'a SizeAlign) -> Self {
         Self {
             direction: Direction::Import { param_name },
             args: Vec::new(),
@@ -72,7 +71,6 @@ impl<'a> Func<'a> {
             block_storage: Vec::new(),
             blocks: Vec::new(),
             sizes,
-            go_imports,
         }
     }
 
@@ -315,7 +313,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $(&self.go_imports.wazero_api_encode_u32)($operand)
+                    $result := $WAZERO_API_ENCODE_U32($operand)
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -325,7 +323,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $(&self.go_imports.wazero_api_decode_u32)($operand)
+                    $result := $WAZERO_API_DECODE_U32($operand)
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1105,7 +1103,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $(&value) := $(&self.go_imports.wazero_api_encode_i32)($operand)
+                    $(&value) := $WAZERO_API_ENCODE_I32($operand)
                 }
                 results.push(Operand::SingleValue(value))
             }
@@ -1119,7 +1117,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $(&value) := $(&self.go_imports.wazero_api_encode_i32)(int32($operand))
+                    $(&value) := $WAZERO_API_ENCODE_I32(int32($operand))
                 }
                 results.push(Operand::SingleValue(value))
             }
@@ -1132,7 +1130,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := int8($(&self.go_imports.wazero_api_decode_i32)($operand))
+                    $result := int8($WAZERO_API_DECODE_I32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1143,7 +1141,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint8($(&self.go_imports.wazero_api_decode_u32)($operand))
+                    $result := uint8($WAZERO_API_DECODE_U32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1154,7 +1152,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := int16($(&self.go_imports.wazero_api_decode_i32)($operand))
+                    $result := int16($WAZERO_API_DECODE_I32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1165,7 +1163,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := uint16($(&self.go_imports.wazero_api_decode_u32)($operand))
+                    $result := uint16($WAZERO_API_DECODE_U32($operand))
                 };
                 results.push(Operand::SingleValue(result.into()));
             }
@@ -1175,7 +1173,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $result := $(&self.go_imports.wazero_api_decode_i32)($operand)
+                    $result := $WAZERO_API_DECODE_I32($operand)
                 };
                 results.push(Operand::SingleValue(result.into()));
             }

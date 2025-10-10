@@ -13,7 +13,7 @@ use wit_bindgen_core::{
 use arcjet_gravity::{
     Func,
     codegen::{Bindings, WasmData},
-    go::{GoIdentifier, GoImports, GoResult, GoType},
+    go::{GoIdentifier, GoResult, GoType},
     resolve_type,
 };
 
@@ -79,7 +79,6 @@ fn main() -> Result<ExitCode, ()> {
     let instance = &GoIdentifier::public(format!("{selected_world}-instance"));
 
     let context = &go::import("context", "Context");
-    let go_imports = GoImports::new();
 
     let Some((_, world)) = bindgen
         .resolve
@@ -130,7 +129,7 @@ fn main() -> Result<ExitCode, ()> {
                     None => GoResult::Empty,
                 };
 
-                let mut f = Func::export(result, &sizes, &go_imports);
+                let mut f = Func::export(result, &sizes);
                 wit_bindgen_core::abi::call(
                     &bindgen.resolve,
                     AbiVariant::GuestExport,

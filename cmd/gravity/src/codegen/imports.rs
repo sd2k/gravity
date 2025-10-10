@@ -16,7 +16,10 @@ use crate::{
             Parameter, TypeDefinition, WitReturn,
         },
     },
-    go::{GoIdentifier, GoImports, GoResult, GoType},
+    go::{
+        GoIdentifier, GoResult, GoType,
+        imports::{CONTEXT_CONTEXT, WAZERO_API_MODULE},
+    },
     resolve_type,
 };
 
@@ -251,22 +254,15 @@ impl<'a> ImportAnalyzer<'a> {
 /// Code generator for imports - takes analysis results and generates Go code
 pub struct ImportCodeGenerator<'a> {
     resolve: &'a Resolve,
-    go_imports: &'a GoImports,
     analyzed: &'a AnalyzedImports,
     sizes: &'a SizeAlign,
 }
 
 impl<'a> ImportCodeGenerator<'a> {
     /// Create a new import code generator with the given imports and analyzed results.
-    pub fn new(
-        resolve: &'a Resolve,
-        go_imports: &'a GoImports,
-        analyzed: &'a AnalyzedImports,
-        sizes: &'a SizeAlign,
-    ) -> Self {
+    pub fn new(resolve: &'a Resolve, analyzed: &'a AnalyzedImports, sizes: &'a SizeAlign) -> Self {
         Self {
             resolve,
-            go_imports,
             analyzed,
             sizes,
         }
@@ -348,7 +344,7 @@ impl<'a> ImportCodeGenerator<'a> {
 
         quote! {
             $(&method.go_method_name)(
-                ctx $(&self.go_imports.context),
+                ctx $CONTEXT_CONTEXT,
                 $(for param in &method.parameters join ($['\r']) => $(&param.name) $(&param.go_type),)
             ) $return_type
         }
@@ -420,8 +416,8 @@ impl<'a> ImportCodeGenerator<'a> {
 
         // Generate Wasm function parameters based on WIT types.
         let wasm_params = vec![
-            quote! { ctx $(&self.go_imports.context) },
-            quote! { mod $(&self.go_imports.wazero_api_module) },
+            quote! { ctx $CONTEXT_CONTEXT },
+            quote! { mod $WAZERO_API_MODULE },
         ];
 
         let wasm_sig = self
@@ -432,7 +428,7 @@ impl<'a> ImportCodeGenerator<'a> {
         } else {
             todo!("implement handling of wasm signatures with results");
         };
-        let mut f = Func::import(param_name, result, self.sizes, self.go_imports);
+        let mut f = Func::import(param_name, result, self.sizes);
 
         // Magic
         wit_bindgen_core::abi::call(
@@ -472,7 +468,7 @@ mod tests {
             imports::{ImportAnalyzer, ImportCodeGenerator},
             ir::{AnalyzedImports, InterfaceMethod, Parameter, WitReturn},
         },
-        go::{GoIdentifier, GoImports, GoType},
+        go::{GoIdentifier, GoType},
     };
 
     #[test]
@@ -491,7 +487,6 @@ mod tests {
         let sizes = SizeAlign::default();
 
         // Mock data
-        let go_imports = GoImports::default();
         let analyzed = AnalyzedImports {
             instance_name: GoIdentifier::public("TestInstance"),
             interfaces: vec![],
@@ -501,7 +496,7 @@ mod tests {
             constructor_name: GoIdentifier::public("NewTestFactory"),
         };
 
-        let generator = ImportCodeGenerator::new(&resolve, &go_imports, &analyzed, &sizes);
+        let generator = ImportCodeGenerator::new(&resolve, &analyzed, &sizes);
         let method = InterfaceMethod {
             name: "test_function".to_string(),
             go_method_name: GoIdentifier::public("TestFunction"),
@@ -532,7 +527,6 @@ mod tests {
     #[test]
     fn test_different_wit_types() {
         // Test that different WIT types generate different parameter handling
-        let go_imports = GoImports::default();
         let analyzed = AnalyzedImports {
             instance_name: GoIdentifier::public("TestInstance"),
             interfaces: vec![],
@@ -544,7 +538,7 @@ mod tests {
         let resolve = Resolve::new();
         let sizes = SizeAlign::default();
 
-        let generator = ImportCodeGenerator::new(&resolve, &go_imports, &analyzed, &sizes);
+        let generator = ImportCodeGenerator::new(&resolve, &analyzed, &sizes);
 
         // Test U32 parameter
         let u32_method = InterfaceMethod {
@@ -658,7 +652,6 @@ mod tests {
     fn test_import_code_generator() {
         let (resolve, world_id) = create_test_world_with_interface();
         let world = &resolve.worlds[world_id];
-        let go_imports = GoImports::new();
         let sizes = SizeAlign::default();
 
         // Analyze
@@ -666,7 +659,7 @@ mod tests {
         let analyzed = analyzer.analyze();
 
         // Generate
-        let generator = ImportCodeGenerator::new(&resolve, &go_imports, &analyzed, &sizes);
+        let generator = ImportCodeGenerator::new(&resolve, &analyzed, &sizes);
         let mut tokens = Tokens::<Go>::new();
         generator.format_into(&mut tokens);
 
@@ -852,9 +845,8 @@ mod tests {
         }
 
         // Test code generation
-        let go_imports = GoImports::new();
         let sizes = SizeAlign::default();
-        let generator = ImportCodeGenerator::new(&resolve, &go_imports, &analyzed, &sizes);
+        let generator = ImportCodeGenerator::new(&resolve, &analyzed, &sizes);
         let mut tokens = Tokens::<Go>::new();
         generator.format_into(&mut tokens);
 

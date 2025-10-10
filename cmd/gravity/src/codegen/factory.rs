@@ -4,13 +4,18 @@ use genco::prelude::*;
 
 use crate::{
     codegen::ir::AnalyzedImports,
-    go::{GoIdentifier, GoImports, comment},
+    go::{
+        GoIdentifier, comment,
+        imports::{
+            CONTEXT_CONTEXT, ERRORS_NEW, WAZERO_API_MEMORY, WAZERO_API_MODULE,
+            WAZERO_COMPILED_MODULE, WAZERO_NEW_MODULE_CONFIG, WAZERO_NEW_RUNTIME, WAZERO_RUNTIME,
+        },
+    },
 };
 
 /// Configuration for factory generation
 pub struct FactoryConfig<'a> {
     pub analyzed_imports: &'a AnalyzedImports,
-    pub go_imports: &'a GoImports,
     pub import_chains: BTreeMap<String, Tokens<Go>>,
     pub wasm_var_name: &'a GoIdentifier,
 }
@@ -33,8 +38,6 @@ impl<'a> FactoryGenerator<'a> {
 
     /// Generate the `writeString` helper function.
     fn generate_write_string(&self, tokens: &mut Tokens<Go>) {
-        let go_imports = self.config.go_imports;
-
         // Add writeString helper function for interface string returns
         quote_in! { *tokens =>
             $(comment(&[
@@ -42,9 +45,9 @@ impl<'a> FactoryGenerator<'a> {
                 "Model calling conventions, such as allocating memory with the realloc function",
             ]))
             func writeString(
-                ctx $(&go_imports.context),
+                ctx $CONTEXT_CONTEXT,
                 s string,
-                memory $(&go_imports.wazero_api_memory),
+                memory $WAZERO_API_MEMORY,
                 realloc api.Function,
             ) (uint64, uint64, error) {
                 if len(s) == 0 {
@@ -58,7 +61,7 @@ impl<'a> FactoryGenerator<'a> {
                 ptr := results[0]
                 ok := memory.Write(uint32(ptr), []byte(s))
                 if !ok {
-                    return 1, 0, $(&go_imports.errors_new)("failed to write string to wasm memory")
+                    return 1, 0, $ERRORS_NEW("failed to write string to wasm memory")
                 }
                 return uint64(ptr), uint64(len(s)), nil
             }
@@ -74,15 +77,14 @@ impl<'a> FactoryGenerator<'a> {
             constructor_name,
             ..
         } = &self.config.analyzed_imports;
-        let go_imports = self.config.go_imports;
         let wasm_var_name = self.config.wasm_var_name;
         // Build the parameter list
         let params = self.build_parameters();
         quote_in! { *tokens =>
             $['\n']
             type $factory_name struct {
-                runtime $(&go_imports.wazero_runtime)
-                module  $(&go_imports.wazero_compiled_module)
+                runtime $WAZERO_RUNTIME
+                module  $WAZERO_COMPILED_MODULE
             }
             $['\n']
             func $constructor_name(
@@ -90,7 +92,7 @@ impl<'a> FactoryGenerator<'a> {
                 $params
                 $['\r']
             ) (*$factory_name, error) {
-                wazeroRuntime := $(&go_imports.wazero_new_runtime)(ctx)
+                wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
 
                 $(for chain in self.config.import_chains.values() =>
                     $chain
@@ -111,15 +113,15 @@ impl<'a> FactoryGenerator<'a> {
                 }, nil
             }
             $['\n']
-            func (f *$factory_name) Instantiate(ctx $(&go_imports.context)) (*$instance_name, error) {
-                if module, err := f.runtime.InstantiateModule(ctx, f.module, $(&go_imports.wazero_new_module_config)()); err != nil {
+            func (f *$factory_name) Instantiate(ctx $CONTEXT_CONTEXT) (*$instance_name, error) {
+                if module, err := f.runtime.InstantiateModule(ctx, f.module, $WAZERO_NEW_MODULE_CONFIG()); err != nil {
                     return nil, err
                 } else {
                     return &$instance_name{module}, nil
                 }
             }
             $['\n']
-            func (f *$factory_name) Close(ctx $(&go_imports.context)) {
+            func (f *$factory_name) Close(ctx $CONTEXT_CONTEXT) {
                 f.runtime.Close(ctx)
             }
             $['\n']
@@ -128,14 +130,13 @@ impl<'a> FactoryGenerator<'a> {
 
     /// Generate the Instance struct, and methods.
     fn generate_instance(&self, tokens: &mut Tokens<Go>) {
-        let go_imports = self.config.go_imports;
         let instance_name = &self.config.analyzed_imports.instance_name;
         quote_in! { *tokens =>
             type $instance_name struct {
-                module $(&go_imports.wazero_api_module)
+                module $WAZERO_API_MODULE
             }
             $['\n']
-            func (i *$instance_name) Close(ctx $(&go_imports.context)) error {
+            func (i *$instance_name) Close(ctx $CONTEXT_CONTEXT) error {
                 if err := i.module.Close(ctx); err != nil {
                     return err
                 }
@@ -148,11 +149,10 @@ impl<'a> FactoryGenerator<'a> {
 
     /// Build parameter list for factory constructor
     fn build_parameters(&self) -> Tokens<Go> {
-        let go_imports = self.config.go_imports;
         let interfaces = &self.config.analyzed_imports.interfaces;
 
         quote! {
-            ctx $(&go_imports.context),
+            ctx $CONTEXT_CONTEXT,
             $(for interface in interfaces.iter() =>
             $(&interface.constructor_param_name) $(&interface.go_interface_name),)
         }
@@ -176,7 +176,7 @@ mod tests {
 
     use crate::{
         codegen::{FactoryGenerator, factory::FactoryConfig, ir::AnalyzedImports},
-        go::{GoIdentifier, GoImports},
+        go::GoIdentifier,
     };
 
     #[test]
@@ -189,11 +189,9 @@ mod tests {
             instance_name: GoIdentifier::public("test-instance"),
             constructor_name: GoIdentifier::public("test-constructor"),
         };
-        let go_imports = &GoImports::new();
         let config = FactoryConfig {
             analyzed_imports,
             import_chains: Default::default(),
-            go_imports,
             wasm_var_name: &GoIdentifier::public("test-wasm"),
         };
         let generator = FactoryGenerator::new(config);
