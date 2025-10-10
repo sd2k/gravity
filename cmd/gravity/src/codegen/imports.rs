@@ -457,7 +457,6 @@ impl<'a> ImportCodeGenerator<'a> {
 #[cfg(test)]
 mod tests {
     use genco::prelude::*;
-    use indexmap::indexmap;
     use wit_bindgen_core::wit_parser::{
         Function, FunctionKind, Interface, Package, PackageName, Resolve, SizeAlign, Type, World,
         WorldId, WorldItem, WorldKey,
@@ -592,16 +591,18 @@ mod tests {
         let interface_id = resolve.interfaces.alloc(Interface {
             name: Some("logger".to_string()),
             package: Some(package_id),
-            functions: indexmap! {
-                "log".to_string() => Function {
+            functions: [(
+                "log".to_string(),
+                Function {
                     name: "log".to_string(),
                     params: vec![("message".to_string(), Type::String)],
                     result: None,
                     kind: FunctionKind::Freestanding,
                     docs: Default::default(),
                     stability: Default::default(),
-                }
-            },
+                },
+            )]
+            .into(),
             types: Default::default(),
             docs: Default::default(),
             stability: Default::default(),
@@ -610,9 +611,14 @@ mod tests {
         // Create a world with the interface as import
         let world = World {
             name: "test-world".to_string(),
-            imports: indexmap! {
-                WorldKey::Name("logger".to_string()) => WorldItem::Interface { id: interface_id, stability: Default::default() }
-            },
+            imports: [(
+                WorldKey::Name("logger".to_string()),
+                WorldItem::Interface {
+                    id: interface_id,
+                    stability: Default::default(),
+                },
+            )]
+            .into(),
             exports: Default::default(),
             docs: Default::default(),
             stability: Default::default(),
@@ -748,9 +754,14 @@ mod tests {
         // Create a world that imports this interface
         let world = World {
             name: "test-world".to_string(),
-            imports: indexmap! {
-                WorldKey::Name("types".to_string()) => WorldItem::Interface { id: interface_id, stability: Default::default() }
-            },
+            imports: [(
+                WorldKey::Name("types".to_string()),
+                WorldItem::Interface {
+                    id: interface_id,
+                    stability: Default::default(),
+                },
+            )]
+            .into(),
             exports: Default::default(),
             docs: Default::default(),
             stability: Default::default(),
@@ -966,9 +977,14 @@ mod tests {
 
         let world = World {
             name: "test-world".to_string(),
-            imports: indexmap! {
-                WorldKey::Name("types".to_string()) => WorldItem::Interface { id: interface_id, stability: Default::default() }
-            },
+            imports: [(
+                WorldKey::Name("types".to_string()),
+                WorldItem::Interface {
+                    id: interface_id,
+                    stability: Default::default(),
+                },
+            )]
+            .into(),
             exports: Default::default(),
             docs: Default::default(),
             stability: Default::default(),
