@@ -5,6 +5,7 @@ mod embed;
 #[path = "./type.rs"]
 mod go_type;
 mod identifier;
+pub mod imports;
 mod operand;
 mod result;
 

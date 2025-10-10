@@ -7,6 +7,9 @@ use wit_bindgen_core::{
     wit_parser::{Resolve, Result_, Type, TypeDef, TypeDefKind},
 };
 
+// Temporary re-export while we migrate.
+pub use codegen::Func;
+
 /// Resolves a Wasm type to a Go type.
 pub fn resolve_wasm_type(typ: &WasmType) -> GoType {
     match typ {
