@@ -118,9 +118,6 @@ fn main() -> Result<ExitCode, ()> {
                     }
                 }
 
-                let mut sizes = SizeAlign::default();
-                sizes.fill(&bindgen.resolve);
-
                 let result = match &func.result {
                     Some(wit_type) => {
                         let go_type = resolve_type(wit_type, &bindgen.resolve);
