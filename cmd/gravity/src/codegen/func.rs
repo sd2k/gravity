@@ -36,6 +36,13 @@ struct ResourceContext {
     table_var: String,
 }
 
+/// Expression for getting the pointer size in an imported function. This will use the architecture
+/// size from the factory.
+const IMPORT_PTRSIZE_EXPR: &str = "factory.architecture.PointerSize()";
+/// Expression for getting the pointer size in an exported function. This will use the architecture
+/// field of the 'instance' struct.
+const EXPORT_PTRSIZE_EXPR: &str = "i.architecture.PointerSize()";
+
 enum Direction<'a> {
     /// The function is imported into the world.
     Import {
@@ -380,8 +387,7 @@ impl Bindgen for Func<'_> {
                 }
             }
             Instruction::I32Load8U { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
                 let ok = &format!("ok{tmp}");
@@ -389,7 +395,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $value, $ok := i.module.Memory().ReadByte(uint32($operand + $offset))
+                    $value, $ok := i.module.Memory().ReadByte(uint32($operand) + uint32($offset))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -471,16 +477,25 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(result.into()));
             }
             Instruction::PointerLoad { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = &offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tmp = self.tmp();
                 let ptr = &format!("ptr{tmp}");
+                let tmp_ptr = &format!("tmpPtr{tmp}");
                 let ok = &format!("ok{tmp}");
                 let default = &format!("default{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $ptr, $ok := i.module.Memory().ReadUint32Le(uint32($operand + $offset))
+                    var $ptr uint64
+                    var $ok bool
+                    switch i.architecture {
+                    case ArchitectureWasm64:
+                        $ptr, $ok = i.module.Memory().ReadUint64Le(uint32($operand) + uint32($offset))
+                    case ArchitectureWasm32:
+                        var $tmp_ptr uint32
+                        $tmp_ptr, $ok = i.module.Memory().ReadUint32Le(uint32($operand) + uint32($offset))
+                        $ptr = uint64($tmp_ptr)
+                    }
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -504,16 +519,25 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(ptr.into()));
             }
             Instruction::LengthLoad { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = &offset.format_term(EXPORT_PTRSIZE_EXPR, true);
                 let tmp = self.tmp();
                 let len = &format!("len{tmp}");
+                let tmp_len = &format!("tmpLen{tmp}");
                 let ok = &format!("ok{tmp}");
                 let default = &format!("default{tmp}");
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $len, $ok := i.module.Memory().ReadUint32Le(uint32($operand + $offset))
+                    var $len uint64
+                    var $ok bool
+                    switch i.architecture {
+                    case ArchitectureWasm64:
+                        $len, $ok = i.module.Memory().ReadUint64Le(uint32($operand) + uint32($offset))
+                    case ArchitectureWasm32:
+                        var $tmp_len uint32
+                        $tmp_len, $ok = i.module.Memory().ReadUint32Le(uint32($operand) + uint32($offset))
+                        $len = uint64($tmp_len)
+                    }
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -537,8 +561,7 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(len.into()));
             }
             Instruction::I32Load { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
                 let ok = &format!("ok{tmp}");
@@ -546,7 +569,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $value, $ok := i.module.Memory().ReadUint32Le(uint32($operand + $offset))
+                    $value, $ok := i.module.Memory().ReadUint32Le(uint32($operand) + uint32($offset))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -581,7 +604,7 @@ impl Bindgen for Func<'_> {
                     Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            $buf, $ok := i.module.Memory().Read($ptr, $len)
+                            $buf, $ok := i.module.Memory().Read(uint32($ptr), uint32($len))
                             $(match &self.result {
                                 GoResult::Anon(GoType::ValueOrError(typ)) => {
                                     if !$ok {
@@ -607,7 +630,7 @@ impl Bindgen for Func<'_> {
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            $buf, $ok := mod.Memory().Read($ptr, $len)
+                            $buf, $ok := mod.Memory().Read(uint32($ptr), uint32($len))
                             if !$ok {
                                 panic($ERRORS_NEW("failed to read bytes from memory"))
                             }
@@ -867,8 +890,7 @@ impl Bindgen for Func<'_> {
             }
             Instruction::I32Const { val } => results.push(Operand::Literal(val.to_string())),
             Instruction::I32Store8 { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 if let Operand::Literal(byte) = tag {
@@ -876,13 +898,13 @@ impl Bindgen for Func<'_> {
                         Direction::Export { .. } => {
                             quote_in! { self.body =>
                                 $['\r']
-                                i.module.Memory().WriteByte(uint32($ptr+$offset), $byte)
+                                i.module.Memory().WriteByte(uint32($ptr)+uint32($offset), $byte)
                             }
                         }
                         Direction::Import { .. } => {
                             quote_in! { self.body =>
                                 $['\r']
-                                mod.Memory().WriteByte(uint32($ptr+$offset), $byte)
+                                mod.Memory().WriteByte(uint32($ptr)+uint32($offset), $byte)
                             }
                         }
                     }
@@ -925,61 +947,61 @@ impl Bindgen for Func<'_> {
                 }
             }
             Instruction::I32Store { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
                     Direction::Export { .. } => {
+                        let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
+                            i.module.Memory().WriteUint32Le(uint32($ptr)+uint32($offset), uint32($tag))
                         }
                     }
                     Direction::Import { .. } => {
+                        let offset = offset.format_term(IMPORT_PTRSIZE_EXPR, false);
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($tag))
+                            mod.Memory().WriteUint32Le(uint32($ptr) + uint32($offset), uint32($tag))
                         }
                     }
                 }
             }
             Instruction::LengthStore { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
                 let len = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
                     Direction::Export { .. } => {
+                        let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
+                            i.module.Memory().WriteUint32Le(uint32($ptr) + uint32($offset), uint32($len))
                         }
                     }
                     Direction::Import { .. } => {
+                        let offset = offset.format_term(IMPORT_PTRSIZE_EXPR, false);
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($len))
+                            mod.Memory().WriteUint32Le(uint32($ptr) + uint32($offset), uint32($len))
                         }
                     }
                 }
             }
             Instruction::PointerStore { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
                 let value = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
                     Direction::Export { .. } => {
+                        let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
+                            i.module.Memory().WriteUint32Le(uint32($ptr)+uint32($offset), uint32($value))
                         }
                     }
                     Direction::Import { .. } => {
+                        let offset = offset.format_term(IMPORT_PTRSIZE_EXPR, false);
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint32Le(uint32($ptr+$offset), uint32($value))
+                            mod.Memory().WriteUint32Le(uint32($ptr)+uint32($offset), uint32($value))
                         }
                     }
                 }
@@ -1235,14 +1257,17 @@ impl Bindgen for Func<'_> {
                 let ptr = &format!("ptr{tmp}");
                 let len = &format!("len{tmp}");
                 let operand = &operands[0];
-                let size = self.sizes.size(element).size_wasm32();
-                let align = self.sizes.align(element).align_wasm32();
+                let size = &self
+                    .sizes
+                    .size(element)
+                    .format_term(EXPORT_PTRSIZE_EXPR, false);
+                let align = self.sizes.align(element).format(EXPORT_PTRSIZE_EXPR);
 
                 quote_in! { self.body =>
                     $['\r']
                     $vec := $operand
                     $len := uint64(len($vec))
-                    $result, $err := i.module.ExportedFunction($(quoted(*realloc_name))).Call(ctx, 0, 0, $align, $len * $size)
+                    $result, $err := i.module.ExportedFunction($(quoted(*realloc_name))).Call(ctx, 0, 0, uint64($align), $len * uint64($size))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if $err != nil {
@@ -1275,7 +1300,10 @@ impl Bindgen for Func<'_> {
             Instruction::ListLift { element, .. } => {
                 let (body, body_results) = self.pop_block();
                 let tmp = self.tmp();
-                let size = self.sizes.size(element).size_wasm32();
+                let size = self
+                    .sizes
+                    .size(element)
+                    .format_term(EXPORT_PTRSIZE_EXPR, false);
                 let len = &format!("len{tmp}");
                 let base = &format!("base{tmp}");
                 let result = &format!("result{tmp}");
@@ -1292,8 +1320,8 @@ impl Bindgen for Func<'_> {
                     $base := $base_operand
                     $len := $len_operand
                     $result := make([]$typ, $len)
-                    for $idx := uint32(0); $idx < $len; $idx++ {
-                        base := $base + $idx * $size
+                    for $idx := uint64(0); $idx < $len; $idx++ {
+                        base := $base + $idx * uint64($size)
                         $body
                         $result[$idx] = $body_result
                     }
@@ -1449,8 +1477,7 @@ impl Bindgen for Func<'_> {
             Instruction::I32Load16U { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I32Load16S { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I64Load { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
                 let ok = &format!("ok{tmp}");
@@ -1458,7 +1485,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand) + uint32($offset))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -1482,8 +1509,7 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(value.into()));
             }
             Instruction::F32Load { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
                 let ok = &format!("ok{tmp}");
@@ -1491,7 +1517,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand) + uint32($offset))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -1515,8 +1541,7 @@ impl Bindgen for Func<'_> {
                 results.push(Operand::SingleValue(value.into()));
             }
             Instruction::F64Load { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tmp = self.tmp();
                 let value = &format!("value{tmp}");
                 let ok = &format!("ok{tmp}");
@@ -1524,7 +1549,7 @@ impl Bindgen for Func<'_> {
                 let operand = &operands[0];
                 quote_in! { self.body =>
                     $['\r']
-                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand + $offset))
+                    $value, $ok := i.module.Memory().ReadUint64Le(uint32($operand) + uint32($offset))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if !$ok {
@@ -1550,41 +1575,39 @@ impl Bindgen for Func<'_> {
             Instruction::I32Store16 { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::I64Store { .. } => todo!("implement instruction: {inst:?}"),
             Instruction::F32Store { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
                     Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                            i.module.Memory().WriteUint64Le(uint32($ptr)+uint32($offset), $tag)
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                            mod.Memory().WriteUint64Le(uint32($ptr)+uint32($offset), $tag)
                         }
                     }
                 }
             }
             Instruction::F64Store { offset } => {
-                // TODO(#58): Support additional ArchitectureSize
-                let offset = offset.size_wasm32();
+                let offset = offset.format_term(EXPORT_PTRSIZE_EXPR, false);
                 let tag = &operands[0];
                 let ptr = &operands[1];
                 match &self.direction {
                     Direction::Export { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            i.module.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                            i.module.Memory().WriteUint64Le(uint32($ptr)+uint32($offset), $tag)
                         }
                     }
                     Direction::Import { .. } => {
                         quote_in! { self.body =>
                             $['\r']
-                            mod.Memory().WriteUint64Le(uint32($ptr+$offset), $tag)
+                            mod.Memory().WriteUint64Le(uint32($ptr)+uint32($offset), $tag)
                         }
                     }
                 }
@@ -1823,12 +1846,12 @@ impl Bindgen for Func<'_> {
                 let result = &format!("result{tmp}");
                 let err = &format!("err{tmp}");
                 let default = &format!("default{tmp}");
-                let size = size.size_wasm32();
-                let align = align.align_wasm32();
+                let size = size.format_term(EXPORT_PTRSIZE_EXPR, false);
+                let align = align.format(EXPORT_PTRSIZE_EXPR);
 
                 quote_in! { self.body =>
                     $['\r']
-                    $result, $err := i.module.ExportedFunction($(quoted(*realloc))).Call(ctx, 0, 0, $align, $size)
+                    $result, $err := i.module.ExportedFunction($(quoted(*realloc))).Call(ctx, 0, 0, uint64($align), uint64($size))
                     $(match &self.result {
                         GoResult::Anon(GoType::ValueOrError(typ)) => {
                             if $err != nil {

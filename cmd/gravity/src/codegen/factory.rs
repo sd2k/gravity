@@ -127,11 +127,31 @@ impl<'a> FactoryGenerator<'a> {
                 }
             }
 
+            let generics = &quote! {
+                $(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)
+            };
+            let generics_with_constraints = &quote! {
+                $(for (value_param, pointer_param, pointer_iface) in &type_param_data join (, ) => $value_param any, $pointer_param $pointer_iface[$value_param])
+            };
+            let factory_name_with_generics = &quote! {
+                $factory_name[$generics]
+            };
+            let options_name = &quote! { $(factory_name)Options };
+
             quote_in! { *tokens =>
+                $['\n']
+                type $options_name[$generics_with_constraints] func(*$factory_name_with_generics)
+                $['\n']
+                func $(factory_name)WithArchitecture[$(generics_with_constraints)](architecture Architecture) $options_name[$generics] {
+                    return func(factory *$factory_name_with_generics) {
+                        factory.architecture = architecture
+                    }
+                }
                 $['\n']
                 type $factory_name[$(for (value_param, pointer_param, pointer_iface) in &type_param_data join (, ) => $value_param any, $pointer_param $pointer_iface[$value_param])] struct {
                     runtime $WAZERO_RUNTIME
                     module  $WAZERO_COMPILED_MODULE
+                    architecture Architecture
                     $['\r']
                     $(for (_iface_name, _resource_name, prefixed_name, type_param_name) in resource_info.iter() join ($['\r']) =>
                     $(&GoIdentifier::public(format!("{}-resource-table", prefixed_name))) *$(&GoIdentifier::private(format!("{}-resource-table", prefixed_name)))[$(&GoIdentifier::public(format!("t-{}-value", prefixed_name))), $(&GoIdentifier::public(format!("p-{}", String::from(type_param_name))))])
@@ -142,14 +162,41 @@ impl<'a> FactoryGenerator<'a> {
                     ctx $CONTEXT_CONTEXT,
                     $(for param_tokens in &interface_params join ($['\r']) => $param_tokens)
                     $['\r']
+                    opts ...$options_name[$generics],
                 ) (*$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)], error) {
                     $['\r']
                     wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
+
                     $['\r']
                     $(comment(&["Initialize resource tables before host module instantiation"]))
                     $(for (_iface_name, _resource_name, prefixed_name, type_param_name) in resource_info.iter() join ($['\r']) =>
                     $(&GoIdentifier::private(format!("{}_resource_table", prefixed_name))) := new$(&GoIdentifier::public(format!("{}-resource-table", prefixed_name)))[$(&GoIdentifier::public(format!("t-{}-value", prefixed_name))), $(&GoIdentifier::public(format!("p-{}", String::from(type_param_name))))]())
                     $['\r']
+
+                    $['\r']
+                    $(comment(&[
+                    "Compiling the module takes a LONG time, so we want to do it once and hold",
+                        "onto it with the Runtime",
+                    ]))
+                    module, err := wazeroRuntime.CompileModule(ctx, $wasm_var_name)
+                    if err != nil {
+                        return nil, err
+                    }
+                    $['\r']
+
+                    factory := &$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)]{
+                        runtime: wazeroRuntime,
+                        module:  module,
+                        $(comment(["Initialize architecture to wasm32 by default"]))
+                        architecture: ArchitectureWasm32,
+                        $['\r']
+                        $(for (_iface_name, _resource_name, prefixed_name, _) in resource_info.iter() =>
+                        $(&GoIdentifier::public(format!("{}-resource-table", prefixed_name))): $(&GoIdentifier::private(format!("{}_resource_table", prefixed_name))),$['\r'])
+                    }
+                    $['\r']
+                    for _, opt := range opts {
+                        opt(factory)
+                    }
                     $['\r']
                     $(comment(&["Instantiate import host modules"]))
                     $(for chain in self.config.import_chains.values() =>
@@ -162,22 +209,7 @@ impl<'a> FactoryGenerator<'a> {
                     $chain
                     $['\r']
                 )
-                    $['\r']
-                    $(comment(&[
-                    "Compiling the module takes a LONG time, so we want to do it once and hold",
-                       "onto it with the Runtime",
-                ]))
-                    module, err := wazeroRuntime.CompileModule(ctx, $wasm_var_name)
-                    if err != nil {
-                        return nil, err
-                    }
-                    return &$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)]{
-                        runtime: wazeroRuntime,
-                        module:  module,
-                        $['\r']
-                        $(for (_iface_name, _resource_name, prefixed_name, _) in resource_info.iter() =>
-                        $(&GoIdentifier::public(format!("{}-resource-table", prefixed_name))): $(&GoIdentifier::private(format!("{}_resource_table", prefixed_name))),$['\r'])
-                    }, nil
+                    return factory, nil
                 }
             $['\n']
             func (f *$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)]) Instantiate(ctx $CONTEXT_CONTEXT) (*$instance_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)], error) {
@@ -202,43 +234,62 @@ impl<'a> FactoryGenerator<'a> {
             let interfaces = &self.config.analyzed_imports.interfaces;
             quote_in! { *tokens =>
                 $['\n']
+                type $(factory_name)Options func(*$factory_name)
+                $['\n']
+                func $(factory_name)WithArchitecture(architecture Architecture) $(factory_name)Options {
+                    return func(factory *$factory_name) {
+                        factory.architecture = architecture
+                    }
+                }
+                $['\n']
                 type $factory_name struct {
                     runtime $WAZERO_RUNTIME
                     module  $WAZERO_COMPILED_MODULE
+                    architecture Architecture
                 }
                 $['\n']
                 func $constructor_name(
                     ctx $CONTEXT_CONTEXT,
                     $(for interface in interfaces.iter() join ($['\r']) =>
                     $(&interface.constructor_param_name) $(&interface.go_interface_name),)
+                    opts ...$(factory_name)Options,
                 ) (*$factory_name, error) {
                     wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
+                    $['\r']
+                    $(comment(&[
+                        "Compiling the module takes a LONG time, so we want to do it once and hold",
+                            "onto it with the Runtime",
+                    ]))
+                    module, err := wazeroRuntime.CompileModule(ctx, $wasm_var_name)
+                    if err != nil {
+                        return nil, err
+                    }
+                    factory := &$factory_name{
+                        runtime: wazeroRuntime,
+                        module:  module,
+                        $(comment(["Initialize architecture to wasm32 by default"]))
+                        architecture: ArchitectureWasm32,
+                    }
 
+                    $['\r']
+                    for _, opt := range opts {
+                        opt(factory)
+                    }
+                    $['\r']
                     $(comment(&["Instantiate import host modules"]))
                     $(for chain in self.config.import_chains.values() =>
                         $chain
                         $['\r']
                     )
 
-                    $(comment(&[
-                        "Compiling the module takes a LONG time, so we want to do it once and hold",
-                           "onto it with the Runtime",
-                    ]))
-                    module, err := wazeroRuntime.CompileModule(ctx, $wasm_var_name)
-                    if err != nil {
-                        return nil, err
-                    }
-                    return &$factory_name{
-                        runtime: wazeroRuntime,
-                        module:  module,
-                    }, nil
+                    return factory, nil
                 }
                 $['\n']
                 func (f *$factory_name) Instantiate(ctx $CONTEXT_CONTEXT) (*$instance_name, error) {
                     if module, err := f.runtime.InstantiateModule(ctx, f.module, $WAZERO_NEW_MODULE_CONFIG()); err != nil {
                         return nil, err
                     } else {
-                        return &$instance_name{module}, nil
+                        return &$instance_name{module, f.architecture}, nil
                     }
                 }
                 $['\n']
@@ -264,6 +315,7 @@ impl<'a> FactoryGenerator<'a> {
             quote_in! { *tokens =>
                 type $instance_name[$(for (value_param, pointer_param, pointer_iface) in &type_param_data join (, ) => $value_param any, $pointer_param $pointer_iface[$value_param])] struct {
                     module $WAZERO_API_MODULE
+                    architecture Architecture
                     $['\r']
                     $(for (_iface_name, _resource_name, prefixed_name, type_param_name) in resource_info.iter() join ($['\r']) =>
                     $(&GoIdentifier::public(format!("{}-resource-table", prefixed_name))) *$(&GoIdentifier::private(format!("{}-resource-table", prefixed_name)))[$(&GoIdentifier::public(format!("t-{}-value", prefixed_name))), $(&GoIdentifier::public(format!("p-{}", String::from(type_param_name))))])
@@ -283,6 +335,7 @@ impl<'a> FactoryGenerator<'a> {
             quote_in! { *tokens =>
                 type $instance_name struct {
                     module $WAZERO_API_MODULE
+                    architecture Architecture
                 }
                 $['\n']
                 func (i *$instance_name) Close(ctx $CONTEXT_CONTEXT) error {
@@ -522,10 +575,35 @@ impl<'a> FactoryGenerator<'a> {
             }
         }
     }
+
+    fn generate_architecture(&self, tokens: &mut Tokens<Go>) {
+        quote_in! { *tokens =>
+            $['\n']
+            type Architecture uint
+            const (
+                ArchitectureWasm32 Architecture = iota
+                ArchitectureWasm64
+            )
+
+            func (a Architecture) PointerSize() uint32 {
+                switch a {
+                case ArchitectureWasm32:
+                    return 4
+                case ArchitectureWasm64:
+                    return 8
+                default:
+                    panic("invalid architecture")
+                }
+            }
+            $['\n']
+        };
+    }
 }
 
 impl<'a> FormatInto<Go> for &FactoryGenerator<'a> {
     fn format_into(self, tokens: &mut Tokens<Go>) {
+        self.generate_architecture(tokens);
+        tokens.push();
         self.generate_factory(tokens);
         tokens.push();
         self.generate_instance(tokens);

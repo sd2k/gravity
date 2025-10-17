@@ -22,17 +22,59 @@ type CustomTuple struct {
 	F2 string
 }
 
+type Architecture uint
+const (
+	ArchitectureWasm32 Architecture = iota
+	ArchitectureWasm64
+)
+
+func (a Architecture) PointerSize() uint32 {
+	switch a {
+	case ArchitectureWasm32:
+		return 4
+	case ArchitectureWasm64:
+		return 8
+	default:
+		panic("invalid architecture")
+	}
+}
+
+type TuplesFactoryOptions func(*TuplesFactory)
+
+func TuplesFactoryWithArchitecture(architecture Architecture) TuplesFactoryOptions {
+	return func(factory *TuplesFactory) {
+		factory.architecture = architecture
+	}
+}
+
 type TuplesFactory struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
+	architecture Architecture
 }
 
 func NewTuplesFactory(
 	ctx context.Context,
 	types ITuplesTypes,
+	opts ...TuplesFactoryOptions,
 ) (*TuplesFactory, error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
+	// Compiling the module takes a LONG time, so we want to do it once and hold
+	// onto it with the Runtime
+	module, err := wazeroRuntime.CompileModule(ctx, wasmFileTuples)
+	if err != nil {
+		return nil, err
+	}
+	factory := &TuplesFactory{
+		runtime: wazeroRuntime,
+		module: module,
+		// Initialize architecture to wasm32 by default
+		architecture: ArchitectureWasm32,
+	}
 
+	for _, opt := range opts {
+		opt(factory)
+	}
 	// Instantiate import host modules
 	_, err0 := wazeroRuntime.NewHostModuleBuilder("arcjet:tuples/types").
 	Instantiate(ctx)
@@ -40,23 +82,14 @@ func NewTuplesFactory(
 		return nil, err0
 	}
 
-	// Compiling the module takes a LONG time, so we want to do it once and hold
-	// onto it with the Runtime
-	module, err := wazeroRuntime.CompileModule(ctx, wasmFileTuples)
-	if err != nil {
-		return nil, err
-	}
-	return &TuplesFactory{
-		runtime: wazeroRuntime,
-		module: module,
-	}, nil
+	return factory, nil
 }
 
 func (f *TuplesFactory) Instantiate(ctx context.Context) (*TuplesInstance, error) {
 	if module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig()); err != nil {
 		return nil, err
 	} else {
-		return &TuplesInstance{module}, nil
+		return &TuplesInstance{module, f.architecture}, nil
 	}
 }
 
@@ -66,6 +99,7 @@ func (f *TuplesFactory) Close(ctx context.Context) {
 
 type TuplesInstance struct {
 	module api.Module
+	architecture Architecture
 }
 
 func (i *TuplesInstance) Close(ctx context.Context) error {
@@ -133,17 +167,19 @@ func (i *TuplesInstance) CustomTupleFunc(
 	// deferring this, we ensure that no memory is corrupted before the function
 	// is done accessing it.
 	defer func() {
-		if _, err := i.module.ExportedFunction("cabi_post_custom-tuple-func").Call(ctx, raw4...); err != nil {
-			// If we get an error during cleanup, something really bad is
-			// going on, so we panic. Also, you can't return the error from
-			// the `defer`
-			panic(errors.New("failed to cleanup"))
+		if postFn := i.module.ExportedFunction("cabi_post_custom-tuple-func"); postFn != nil {
+			if _, err := postFn.Call(ctx, raw4...); err != nil {
+				// If we get an error during cleanup, something really bad is
+				// going on, so we panic. Also, you can't return the error from
+				// the `defer`
+				panic(errors.New("failed to cleanup"))
+			}
 		}
 	}()
 
 	results4 := raw4[0]
 	// I32Load { offset: 0 }
-	value5, ok5 := i.module.Memory().ReadUint32Le(uint32(results4 + 0))
+	value5, ok5 := i.module.Memory().ReadUint32Le(uint32(results4) + uint32(0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok5 {
 		panic(errors.New("failed to read i32 from memory"))
@@ -151,7 +187,7 @@ func (i *TuplesInstance) CustomTupleFunc(
 	// U32FromI32
 	result6 := api.DecodeU32(uint64(value5))
 	// F64Load { offset: 8 }
-	value7, ok7 := i.module.Memory().ReadUint64Le(uint32(results4 + 8))
+	value7, ok7 := i.module.Memory().ReadUint64Le(uint32(results4) + uint32(8))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok7 {
 		panic(errors.New("failed to read f64 from memory"))
@@ -159,19 +195,37 @@ func (i *TuplesInstance) CustomTupleFunc(
 	// F64FromCoreF64
 	result8 := api.DecodeF64(value7)
 	// PointerLoad { offset: 16 }
-	ptr9, ok9 := i.module.Memory().ReadUint32Le(uint32(results4 + 16))
+	var ptr9 uint64
+	var ok9 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		ptr9, ok9 = i.module.Memory().ReadUint64Le(uint32(results4) + uint32(16))
+	case ArchitectureWasm32:
+		var tmpPtr9 uint32
+		tmpPtr9, ok9 = i.module.Memory().ReadUint32Le(uint32(results4) + uint32(16))
+		ptr9 = uint64(tmpPtr9)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok9 {
 		panic(errors.New("failed to read pointer from memory"))
 	}
 	// LengthLoad { offset: (16+1*ptrsz) }
-	len10, ok10 := i.module.Memory().ReadUint32Le(uint32(results4 + 20))
+	var len10 uint64
+	var ok10 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		len10, ok10 = i.module.Memory().ReadUint64Le(uint32(results4) + uint32(16+1*i.architecture.PointerSize()))
+	case ArchitectureWasm32:
+		var tmpLen10 uint32
+		tmpLen10, ok10 = i.module.Memory().ReadUint32Le(uint32(results4) + uint32(16+1*i.architecture.PointerSize()))
+		len10 = uint64(tmpLen10)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok10 {
 		panic(errors.New("failed to read length from memory"))
 	}
 	// StringLift
-	buf11, ok11 := i.module.Memory().Read(ptr9, len10)
+	buf11, ok11 := i.module.Memory().Read(uint32(ptr9), uint32(len10))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok11 {
 		panic(errors.New("failed to read bytes from memory"))
@@ -220,17 +274,19 @@ func (i *TuplesInstance) AnonymousTupleFunc(
 	// deferring this, we ensure that no memory is corrupted before the function
 	// is done accessing it.
 	defer func() {
-		if _, err := i.module.ExportedFunction("cabi_post_anonymous-tuple-func").Call(ctx, raw4...); err != nil {
-			// If we get an error during cleanup, something really bad is
-			// going on, so we panic. Also, you can't return the error from
-			// the `defer`
-			panic(errors.New("failed to cleanup"))
+		if postFn := i.module.ExportedFunction("cabi_post_anonymous-tuple-func"); postFn != nil {
+			if _, err := postFn.Call(ctx, raw4...); err != nil {
+				// If we get an error during cleanup, something really bad is
+				// going on, so we panic. Also, you can't return the error from
+				// the `defer`
+				panic(errors.New("failed to cleanup"))
+			}
 		}
 	}()
 
 	results4 := raw4[0]
 	// I32Load { offset: 0 }
-	value5, ok5 := i.module.Memory().ReadUint32Le(uint32(results4 + 0))
+	value5, ok5 := i.module.Memory().ReadUint32Le(uint32(results4) + uint32(0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok5 {
 		panic(errors.New("failed to read i32 from memory"))
@@ -238,7 +294,7 @@ func (i *TuplesInstance) AnonymousTupleFunc(
 	// U32FromI32
 	result6 := api.DecodeU32(uint64(value5))
 	// F64Load { offset: 8 }
-	value7, ok7 := i.module.Memory().ReadUint64Le(uint32(results4 + 8))
+	value7, ok7 := i.module.Memory().ReadUint64Le(uint32(results4) + uint32(8))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok7 {
 		panic(errors.New("failed to read f64 from memory"))
@@ -246,19 +302,37 @@ func (i *TuplesInstance) AnonymousTupleFunc(
 	// F64FromCoreF64
 	result8 := api.DecodeF64(value7)
 	// PointerLoad { offset: 16 }
-	ptr9, ok9 := i.module.Memory().ReadUint32Le(uint32(results4 + 16))
+	var ptr9 uint64
+	var ok9 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		ptr9, ok9 = i.module.Memory().ReadUint64Le(uint32(results4) + uint32(16))
+	case ArchitectureWasm32:
+		var tmpPtr9 uint32
+		tmpPtr9, ok9 = i.module.Memory().ReadUint32Le(uint32(results4) + uint32(16))
+		ptr9 = uint64(tmpPtr9)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok9 {
 		panic(errors.New("failed to read pointer from memory"))
 	}
 	// LengthLoad { offset: (16+1*ptrsz) }
-	len10, ok10 := i.module.Memory().ReadUint32Le(uint32(results4 + 20))
+	var len10 uint64
+	var ok10 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		len10, ok10 = i.module.Memory().ReadUint64Le(uint32(results4) + uint32(16+1*i.architecture.PointerSize()))
+	case ArchitectureWasm32:
+		var tmpLen10 uint32
+		tmpLen10, ok10 = i.module.Memory().ReadUint32Le(uint32(results4) + uint32(16+1*i.architecture.PointerSize()))
+		len10 = uint64(tmpLen10)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok10 {
 		panic(errors.New("failed to read length from memory"))
 	}
 	// StringLift
-	buf11, ok11 := i.module.Memory().Read(ptr9, len10)
+	buf11, ok11 := i.module.Memory().Read(uint32(ptr9), uint32(len10))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok11 {
 		panic(errors.New("failed to read bytes from memory"))

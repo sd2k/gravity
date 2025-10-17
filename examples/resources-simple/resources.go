@@ -27,6 +27,23 @@ type IResourcesIface[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerV
 	NewFooer(ctx context.Context, x uint32, y string) TIfaceFooerValue
 }
 
+type Architecture uint
+const (
+	ArchitectureWasm32 Architecture = iota
+	ArchitectureWasm64
+)
+
+func (a Architecture) PointerSize() uint32 {
+	switch a {
+	case ArchitectureWasm32:
+		return 4
+	case ArchitectureWasm64:
+		return 8
+	default:
+		panic("invalid architecture")
+	}
+}
+
 // PIfaceFooer constrains a pointer to a type implementing the IfaceFooer interface.
 type PIfaceFooer[TIfaceFooerValue any] interface {
 	*TIfaceFooerValue
@@ -88,19 +105,48 @@ func (t *ifaceFooerResourceTable[TIfaceFooerValue, PTIfaceFooer]) Remove(handle 
 	delete(t.table, handle)
 }
 
+type ResourcesFactoryOptions[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]] func(*ResourcesFactory[TIfaceFooerValue, PTIfaceFooer])
+
+func ResourcesFactoryWithArchitecture[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]](architecture Architecture) ResourcesFactoryOptions[TIfaceFooerValue, PTIfaceFooer] {
+	return func(factory *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) {
+		factory.architecture = architecture
+	}
+}
+
 type ResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]] struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
+	architecture Architecture
 	IfaceFooerResourceTable *ifaceFooerResourceTable[TIfaceFooerValue, PTIfaceFooer]
 }
 
 func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]](
 	ctx context.Context,
 	iface IResourcesIface[TIfaceFooerValue, PTIfaceFooer],
+	opts ...ResourcesFactoryOptions[TIfaceFooerValue, PTIfaceFooer],
 ) (*ResourcesFactory[TIfaceFooerValue, PTIfaceFooer], error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
+
 	// Initialize resource tables before host module instantiation
 	ifaceFooerResourceTable := newIfaceFooerResourceTable[TIfaceFooerValue, PTIfaceFooer]()
+
+	// Compiling the module takes a LONG time, so we want to do it once and hold
+	// onto it with the Runtime
+	module, err := wazeroRuntime.CompileModule(ctx, wasmFileResources)
+	if err != nil {
+		return nil, err
+	}
+
+	factory := &ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]{
+		runtime: wazeroRuntime,
+		module: module,
+		// Initialize architecture to wasm32 by default
+		architecture: ArchitectureWasm32,
+		IfaceFooerResourceTable: ifaceFooerResourceTable,
+	}
+	for _, opt := range opts {
+		opt(factory)
+	}
 	// Instantiate import host modules
 	_, err0 := wazeroRuntime.NewHostModuleBuilder("arcjet:resources/iface").
 	NewFunctionBuilder().
@@ -117,7 +163,7 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		// GetArg { nth: 1 }
 		// GetArg { nth: 2 }
 		// StringLift
-		buf1, ok1 := mod.Memory().Read(arg1, arg2)
+		buf1, ok1 := mod.Memory().Read(uint32(arg1), uint32(arg2))
 		if !ok1 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
@@ -198,9 +244,9 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 			panic(err2)
 		}
 		// LengthStore { offset: ptrsz }
-		mod.Memory().WriteUint32Le(uint32(arg1+4), uint32(len2))
+		mod.Memory().WriteUint32Le(uint32(arg1) + uint32(factory.architecture.PointerSize()), uint32(len2))
 		// PointerStore { offset: 0 }
-		mod.Memory().WriteUint32Le(uint32(arg1+0), uint32(ptr2))
+		mod.Memory().WriteUint32Le(uint32(arg1)+uint32(0), uint32(ptr2))
 		// Return { amt: 0, func: Function { name: "[method]fooer.get-y", kind: Method(Id { idx: 0 }), params: [("self", Id(Id { idx: 1 }))], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("[method]fooer.get-y").
@@ -218,7 +264,7 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		// GetArg { nth: 1 }
 		// GetArg { nth: 2 }
 		// StringLift
-		buf1, ok1 := mod.Memory().Read(arg1, arg2)
+		buf1, ok1 := mod.Memory().Read(uint32(arg1), uint32(arg2))
 		if !ok1 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
@@ -250,17 +296,7 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		return nil, err0
 	}
 	// Instantiate export resource management host modules
-	// Compiling the module takes a LONG time, so we want to do it once and hold
-	// onto it with the Runtime
-	module, err := wazeroRuntime.CompileModule(ctx, wasmFileResources)
-	if err != nil {
-		return nil, err
-	}
-	return &ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]{
-		runtime: wazeroRuntime,
-		module: module,
-		IfaceFooerResourceTable: ifaceFooerResourceTable,
-	}, nil
+	return factory, nil
 }
 
 func (f *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) Instantiate(ctx context.Context) (*ResourcesInstance[TIfaceFooerValue, PTIfaceFooer], error) {
@@ -280,6 +316,7 @@ func (f *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) Close(ctx context.Con
 
 type ResourcesInstance[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]] struct {
 	module api.Module
+	architecture Architecture
 	IfaceFooerResourceTable *ifaceFooerResourceTable[TIfaceFooerValue, PTIfaceFooer]
 }
 

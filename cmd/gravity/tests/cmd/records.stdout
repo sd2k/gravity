@@ -30,17 +30,59 @@ type Foo struct {
 	Vf64 []float64
 }
 
+type Architecture uint
+const (
+	ArchitectureWasm32 Architecture = iota
+	ArchitectureWasm64
+)
+
+func (a Architecture) PointerSize() uint32 {
+	switch a {
+	case ArchitectureWasm32:
+		return 4
+	case ArchitectureWasm64:
+		return 8
+	default:
+		panic("invalid architecture")
+	}
+}
+
+type RecordsFactoryOptions func(*RecordsFactory)
+
+func RecordsFactoryWithArchitecture(architecture Architecture) RecordsFactoryOptions {
+	return func(factory *RecordsFactory) {
+		factory.architecture = architecture
+	}
+}
+
 type RecordsFactory struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
+	architecture Architecture
 }
 
 func NewRecordsFactory(
 	ctx context.Context,
 	types IRecordsTypes,
+	opts ...RecordsFactoryOptions,
 ) (*RecordsFactory, error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
+	// Compiling the module takes a LONG time, so we want to do it once and hold
+	// onto it with the Runtime
+	module, err := wazeroRuntime.CompileModule(ctx, wasmFileRecords)
+	if err != nil {
+		return nil, err
+	}
+	factory := &RecordsFactory{
+		runtime: wazeroRuntime,
+		module: module,
+		// Initialize architecture to wasm32 by default
+		architecture: ArchitectureWasm32,
+	}
 
+	for _, opt := range opts {
+		opt(factory)
+	}
 	// Instantiate import host modules
 	_, err0 := wazeroRuntime.NewHostModuleBuilder("arcjet:records/types").
 	Instantiate(ctx)
@@ -48,23 +90,14 @@ func NewRecordsFactory(
 		return nil, err0
 	}
 
-	// Compiling the module takes a LONG time, so we want to do it once and hold
-	// onto it with the Runtime
-	module, err := wazeroRuntime.CompileModule(ctx, wasmFileRecords)
-	if err != nil {
-		return nil, err
-	}
-	return &RecordsFactory{
-		runtime: wazeroRuntime,
-		module: module,
-	}, nil
+	return factory, nil
 }
 
 func (f *RecordsFactory) Instantiate(ctx context.Context) (*RecordsInstance, error) {
 	if module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig()); err != nil {
 		return nil, err
 	} else {
-		return &RecordsInstance{module}, nil
+		return &RecordsInstance{module, f.architecture}, nil
 	}
 }
 
@@ -74,6 +107,7 @@ func (f *RecordsFactory) Close(ctx context.Context) {
 
 type RecordsInstance struct {
 	module api.Module
+	architecture Architecture
 }
 
 func (i *RecordsInstance) Close(ctx context.Context) error {
@@ -141,7 +175,7 @@ func (i *RecordsInstance) ModifyFoo(
 	// ListLower { element: F32, realloc: Some("cabi_realloc") }
 	vec7 := vf320
 	len7 := uint64(len(vec7))
-	result7, err7 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, 4, len7 * 4)
+	result7, err7 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, uint64(4), len7 * uint64(4))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err7 != nil {
 		panic(err7)
@@ -155,12 +189,12 @@ func (i *RecordsInstance) ModifyFoo(
 		// CoreF32FromF32
 		result6 := api.EncodeF32(float32(e))
 		// F32Store { offset: 0 }
-		i.module.Memory().WriteUint64Le(uint32(base+0), result6)
+		i.module.Memory().WriteUint64Le(uint32(base)+uint32(0), result6)
 	}
 	// ListLower { element: F64, realloc: Some("cabi_realloc") }
 	vec9 := vf640
 	len9 := uint64(len(vec9))
-	result9, err9 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, 8, len9 * 8)
+	result9, err9 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, uint64(8), len9 * uint64(8))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if err9 != nil {
 		panic(err9)
@@ -174,7 +208,7 @@ func (i *RecordsInstance) ModifyFoo(
 		// CoreF64FromF64
 		result8 := api.EncodeF64(float64(e))
 		// F64Store { offset: 0 }
-		i.module.Memory().WriteUint64Le(uint32(base+0), result8)
+		i.module.Memory().WriteUint64Le(uint32(base)+uint32(0), result8)
 	}
 	// CallWasm { name: "modify-foo", sig: WasmSignature { params: [F32, F64, I32, I64, Pointer, Length, Pointer, Length, Pointer, Length], results: [Pointer], indirect_params: false, retptr: true } }
 	raw10, err10 := i.module.ExportedFunction("modify-foo").Call(ctx, uint64(result1), uint64(result2), uint64(result3), uint64(value4), uint64(ptr5), uint64(len5), uint64(ptr7), uint64(len7), uint64(ptr9), uint64(len9))
@@ -187,17 +221,19 @@ func (i *RecordsInstance) ModifyFoo(
 	// deferring this, we ensure that no memory is corrupted before the function
 	// is done accessing it.
 	defer func() {
-		if _, err := i.module.ExportedFunction("cabi_post_modify-foo").Call(ctx, raw10...); err != nil {
-			// If we get an error during cleanup, something really bad is
-			// going on, so we panic. Also, you can't return the error from
-			// the `defer`
-			panic(errors.New("failed to cleanup"))
+		if postFn := i.module.ExportedFunction("cabi_post_modify-foo"); postFn != nil {
+			if _, err := postFn.Call(ctx, raw10...); err != nil {
+				// If we get an error during cleanup, something really bad is
+				// going on, so we panic. Also, you can't return the error from
+				// the `defer`
+				panic(errors.New("failed to cleanup"))
+			}
 		}
 	}()
 
 	results10 := raw10[0]
 	// F32Load { offset: 0 }
-	value11, ok11 := i.module.Memory().ReadUint64Le(uint32(results10 + 0))
+	value11, ok11 := i.module.Memory().ReadUint64Le(uint32(results10) + uint32(0))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok11 {
 		panic(errors.New("failed to read f64 from memory"))
@@ -205,7 +241,7 @@ func (i *RecordsInstance) ModifyFoo(
 	// F32FromCoreF32
 	result12 := api.DecodeF32(value11)
 	// F64Load { offset: 8 }
-	value13, ok13 := i.module.Memory().ReadUint64Le(uint32(results10 + 8))
+	value13, ok13 := i.module.Memory().ReadUint64Le(uint32(results10) + uint32(8))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok13 {
 		panic(errors.New("failed to read f64 from memory"))
@@ -213,7 +249,7 @@ func (i *RecordsInstance) ModifyFoo(
 	// F64FromCoreF64
 	result14 := api.DecodeF64(value13)
 	// I32Load { offset: 16 }
-	value15, ok15 := i.module.Memory().ReadUint32Le(uint32(results10 + 16))
+	value15, ok15 := i.module.Memory().ReadUint32Le(uint32(results10) + uint32(16))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok15 {
 		panic(errors.New("failed to read i32 from memory"))
@@ -221,7 +257,7 @@ func (i *RecordsInstance) ModifyFoo(
 	// U32FromI32
 	result16 := api.DecodeU32(uint64(value15))
 	// I64Load { offset: 24 }
-	value17, ok17 := i.module.Memory().ReadUint64Le(uint32(results10 + 24))
+	value17, ok17 := i.module.Memory().ReadUint64Le(uint32(results10) + uint32(24))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok17 {
 		panic(errors.New("failed to read i64 from memory"))
@@ -229,32 +265,68 @@ func (i *RecordsInstance) ModifyFoo(
 	// U64FromI64
 	value18 := uint64(value17)
 	// PointerLoad { offset: 32 }
-	ptr19, ok19 := i.module.Memory().ReadUint32Le(uint32(results10 + 32))
+	var ptr19 uint64
+	var ok19 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		ptr19, ok19 = i.module.Memory().ReadUint64Le(uint32(results10) + uint32(32))
+	case ArchitectureWasm32:
+		var tmpPtr19 uint32
+		tmpPtr19, ok19 = i.module.Memory().ReadUint32Le(uint32(results10) + uint32(32))
+		ptr19 = uint64(tmpPtr19)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok19 {
 		panic(errors.New("failed to read pointer from memory"))
 	}
 	// LengthLoad { offset: (32+1*ptrsz) }
-	len20, ok20 := i.module.Memory().ReadUint32Le(uint32(results10 + 36))
+	var len20 uint64
+	var ok20 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		len20, ok20 = i.module.Memory().ReadUint64Le(uint32(results10) + uint32(32+1*i.architecture.PointerSize()))
+	case ArchitectureWasm32:
+		var tmpLen20 uint32
+		tmpLen20, ok20 = i.module.Memory().ReadUint32Le(uint32(results10) + uint32(32+1*i.architecture.PointerSize()))
+		len20 = uint64(tmpLen20)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok20 {
 		panic(errors.New("failed to read length from memory"))
 	}
 	// StringLift
-	buf21, ok21 := i.module.Memory().Read(ptr19, len20)
+	buf21, ok21 := i.module.Memory().Read(uint32(ptr19), uint32(len20))
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok21 {
 		panic(errors.New("failed to read bytes from memory"))
 	}
 	str21 := string(buf21)
 	// PointerLoad { offset: (32+2*ptrsz) }
-	ptr22, ok22 := i.module.Memory().ReadUint32Le(uint32(results10 + 40))
+	var ptr22 uint64
+	var ok22 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		ptr22, ok22 = i.module.Memory().ReadUint64Le(uint32(results10) + uint32((32+2*i.architecture.PointerSize())))
+	case ArchitectureWasm32:
+		var tmpPtr22 uint32
+		tmpPtr22, ok22 = i.module.Memory().ReadUint32Le(uint32(results10) + uint32((32+2*i.architecture.PointerSize())))
+		ptr22 = uint64(tmpPtr22)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok22 {
 		panic(errors.New("failed to read pointer from memory"))
 	}
 	// LengthLoad { offset: (32+3*ptrsz) }
-	len23, ok23 := i.module.Memory().ReadUint32Le(uint32(results10 + 44))
+	var len23 uint64
+	var ok23 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		len23, ok23 = i.module.Memory().ReadUint64Le(uint32(results10) + uint32(32+3*i.architecture.PointerSize()))
+	case ArchitectureWasm32:
+		var tmpLen23 uint32
+		tmpLen23, ok23 = i.module.Memory().ReadUint32Le(uint32(results10) + uint32(32+3*i.architecture.PointerSize()))
+		len23 = uint64(tmpLen23)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok23 {
 		panic(errors.New("failed to read length from memory"))
@@ -263,11 +335,11 @@ func (i *RecordsInstance) ModifyFoo(
 	base26 := ptr22
 	len26 := len23
 	result26 := make([]float32, len26)
-	for idx26 := uint32(0); idx26 < len26; idx26++ {
-		base := base26 + idx26 * 4
+	for idx26 := uint64(0); idx26 < len26; idx26++ {
+		base := base26 + idx26 * uint64(4)
 		// IterBasePointer
 		// F32Load { offset: 0 }
-		value24, ok24 := i.module.Memory().ReadUint64Le(uint32(base + 0))
+		value24, ok24 := i.module.Memory().ReadUint64Le(uint32(base) + uint32(0))
 		// The return type doesn't contain an error so we panic if one is encountered
 		if !ok24 {
 			panic(errors.New("failed to read f64 from memory"))
@@ -277,13 +349,31 @@ func (i *RecordsInstance) ModifyFoo(
 		result26[idx26] = result25
 	}
 	// PointerLoad { offset: (32+4*ptrsz) }
-	ptr27, ok27 := i.module.Memory().ReadUint32Le(uint32(results10 + 48))
+	var ptr27 uint64
+	var ok27 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		ptr27, ok27 = i.module.Memory().ReadUint64Le(uint32(results10) + uint32((32+4*i.architecture.PointerSize())))
+	case ArchitectureWasm32:
+		var tmpPtr27 uint32
+		tmpPtr27, ok27 = i.module.Memory().ReadUint32Le(uint32(results10) + uint32((32+4*i.architecture.PointerSize())))
+		ptr27 = uint64(tmpPtr27)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok27 {
 		panic(errors.New("failed to read pointer from memory"))
 	}
 	// LengthLoad { offset: (32+5*ptrsz) }
-	len28, ok28 := i.module.Memory().ReadUint32Le(uint32(results10 + 52))
+	var len28 uint64
+	var ok28 bool
+	switch i.architecture {
+	case ArchitectureWasm64:
+		len28, ok28 = i.module.Memory().ReadUint64Le(uint32(results10) + uint32(32+5*i.architecture.PointerSize()))
+	case ArchitectureWasm32:
+		var tmpLen28 uint32
+		tmpLen28, ok28 = i.module.Memory().ReadUint32Le(uint32(results10) + uint32(32+5*i.architecture.PointerSize()))
+		len28 = uint64(tmpLen28)
+	}
 	// The return type doesn't contain an error so we panic if one is encountered
 	if !ok28 {
 		panic(errors.New("failed to read length from memory"))
@@ -292,11 +382,11 @@ func (i *RecordsInstance) ModifyFoo(
 	base31 := ptr27
 	len31 := len28
 	result31 := make([]float64, len31)
-	for idx31 := uint32(0); idx31 < len31; idx31++ {
-		base := base31 + idx31 * 8
+	for idx31 := uint64(0); idx31 < len31; idx31++ {
+		base := base31 + idx31 * uint64(8)
 		// IterBasePointer
 		// F64Load { offset: 0 }
-		value29, ok29 := i.module.Memory().ReadUint64Le(uint32(base + 0))
+		value29, ok29 := i.module.Memory().ReadUint64Le(uint32(base) + uint32(0))
 		// The return type doesn't contain an error so we panic if one is encountered
 		if !ok29 {
 			panic(errors.New("failed to read f64 from memory"))

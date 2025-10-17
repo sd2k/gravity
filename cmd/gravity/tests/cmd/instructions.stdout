@@ -12,35 +12,68 @@ import _ "embed"
 //go:embed instructions.wasm
 var wasmFileInstructions []byte
 
+type Architecture uint
+const (
+	ArchitectureWasm32 Architecture = iota
+	ArchitectureWasm64
+)
+
+func (a Architecture) PointerSize() uint32 {
+	switch a {
+	case ArchitectureWasm32:
+		return 4
+	case ArchitectureWasm64:
+		return 8
+	default:
+		panic("invalid architecture")
+	}
+}
+
+type InstructionsFactoryOptions func(*InstructionsFactory)
+
+func InstructionsFactoryWithArchitecture(architecture Architecture) InstructionsFactoryOptions {
+	return func(factory *InstructionsFactory) {
+		factory.architecture = architecture
+	}
+}
+
 type InstructionsFactory struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
+	architecture Architecture
 }
 
 func NewInstructionsFactory(
 	ctx context.Context,
+	opts ...InstructionsFactoryOptions,
 ) (*InstructionsFactory, error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
-
-	// Instantiate import host modules
-
 	// Compiling the module takes a LONG time, so we want to do it once and hold
 	// onto it with the Runtime
 	module, err := wazeroRuntime.CompileModule(ctx, wasmFileInstructions)
 	if err != nil {
 		return nil, err
 	}
-	return &InstructionsFactory{
+	factory := &InstructionsFactory{
 		runtime: wazeroRuntime,
 		module: module,
-	}, nil
+		// Initialize architecture to wasm32 by default
+		architecture: ArchitectureWasm32,
+	}
+
+	for _, opt := range opts {
+		opt(factory)
+	}
+	// Instantiate import host modules
+
+	return factory, nil
 }
 
 func (f *InstructionsFactory) Instantiate(ctx context.Context) (*InstructionsInstance, error) {
 	if module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig()); err != nil {
 		return nil, err
 	} else {
-		return &InstructionsInstance{module}, nil
+		return &InstructionsInstance{module, f.architecture}, nil
 	}
 }
 
@@ -50,6 +83,7 @@ func (f *InstructionsFactory) Close(ctx context.Context) {
 
 type InstructionsInstance struct {
 	module api.Module
+	architecture Architecture
 }
 
 func (i *InstructionsInstance) Close(ctx context.Context) error {
@@ -213,6 +247,50 @@ func (i *InstructionsInstance) U32Roundtrip(
 	// U32FromI32
 	result2 := api.DecodeU32(uint64(results1))
 	// Return { amt: 1, func: Function { name: "u32-roundtrip", kind: Freestanding, params: [("val", U32)], result: Some(U32), docs: Docs { contents: None }, stability: Unknown } }
+	return result2
+}
+
+func (i *InstructionsInstance) F32Roundtrip(
+	ctx context.Context,
+	val float32,
+) float32 {
+	arg0 := val
+	// GetArg { nth: 0 }
+	// CoreF32FromF32
+	result0 := api.EncodeF32(float32(arg0))
+	// CallWasm { name: "f32-roundtrip", sig: WasmSignature { params: [F32], results: [F32], indirect_params: false, retptr: false } }
+	raw1, err1 := i.module.ExportedFunction("f32-roundtrip").Call(ctx, uint64(result0))
+	// The return type doesn't contain an error so we panic if one is encountered
+	if err1 != nil {
+		panic(err1)
+	}
+
+	results1 := raw1[0]
+	// F32FromCoreF32
+	result2 := api.DecodeF32(results1)
+	// Return { amt: 1, func: Function { name: "f32-roundtrip", kind: Freestanding, params: [("val", F32)], result: Some(F32), docs: Docs { contents: None }, stability: Unknown } }
+	return result2
+}
+
+func (i *InstructionsInstance) F64Roundtrip(
+	ctx context.Context,
+	val float64,
+) float64 {
+	arg0 := val
+	// GetArg { nth: 0 }
+	// CoreF64FromF64
+	result0 := api.EncodeF64(float64(arg0))
+	// CallWasm { name: "f64-roundtrip", sig: WasmSignature { params: [F64], results: [F64], indirect_params: false, retptr: false } }
+	raw1, err1 := i.module.ExportedFunction("f64-roundtrip").Call(ctx, uint64(result0))
+	// The return type doesn't contain an error so we panic if one is encountered
+	if err1 != nil {
+		panic(err1)
+	}
+
+	results1 := raw1[0]
+	// F64FromCoreF64
+	result2 := api.DecodeF64(results1)
+	// Return { amt: 1, func: Function { name: "f64-roundtrip", kind: Freestanding, params: [("val", F64)], result: Some(F64), docs: Docs { contents: None }, stability: Unknown } }
 	return result2
 }
 

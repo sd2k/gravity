@@ -25,17 +25,59 @@ type IExampleRuntime interface {
 	)
 }
 
+type Architecture uint
+const (
+	ArchitectureWasm32 Architecture = iota
+	ArchitectureWasm64
+)
+
+func (a Architecture) PointerSize() uint32 {
+	switch a {
+	case ArchitectureWasm32:
+		return 4
+	case ArchitectureWasm64:
+		return 8
+	default:
+		panic("invalid architecture")
+	}
+}
+
+type ExampleFactoryOptions func(*ExampleFactory)
+
+func ExampleFactoryWithArchitecture(architecture Architecture) ExampleFactoryOptions {
+	return func(factory *ExampleFactory) {
+		factory.architecture = architecture
+	}
+}
+
 type ExampleFactory struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
+	architecture Architecture
 }
 
 func NewExampleFactory(
 	ctx context.Context,
 	runtime IExampleRuntime,
+	opts ...ExampleFactoryOptions,
 ) (*ExampleFactory, error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
+	// Compiling the module takes a LONG time, so we want to do it once and hold
+	// onto it with the Runtime
+	module, err := wazeroRuntime.CompileModule(ctx, wasmFileExample)
+	if err != nil {
+		return nil, err
+	}
+	factory := &ExampleFactory{
+		runtime: wazeroRuntime,
+		module: module,
+		// Initialize architecture to wasm32 by default
+		architecture: ArchitectureWasm32,
+	}
 
+	for _, opt := range opts {
+		opt(factory)
+	}
 	// Instantiate import host modules
 	_, err0 := wazeroRuntime.NewHostModuleBuilder("arcjet:example/runtime").
 	NewFunctionBuilder().
@@ -55,9 +97,9 @@ func NewExampleFactory(
 			panic(err1)
 		}
 		// LengthStore { offset: ptrsz }
-		mod.Memory().WriteUint32Le(uint32(arg0+4), uint32(len1))
+		mod.Memory().WriteUint32Le(uint32(arg0) + uint32(factory.architecture.PointerSize()), uint32(len1))
 		// PointerStore { offset: 0 }
-		mod.Memory().WriteUint32Le(uint32(arg0+0), uint32(ptr1))
+		mod.Memory().WriteUint32Le(uint32(arg0)+uint32(0), uint32(ptr1))
 		// Return { amt: 0, func: Function { name: "os", kind: Freestanding, params: [], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("os").
@@ -78,9 +120,9 @@ func NewExampleFactory(
 			panic(err1)
 		}
 		// LengthStore { offset: ptrsz }
-		mod.Memory().WriteUint32Le(uint32(arg0+4), uint32(len1))
+		mod.Memory().WriteUint32Le(uint32(arg0) + uint32(factory.architecture.PointerSize()), uint32(len1))
 		// PointerStore { offset: 0 }
-		mod.Memory().WriteUint32Le(uint32(arg0+0), uint32(ptr1))
+		mod.Memory().WriteUint32Le(uint32(arg0)+uint32(0), uint32(ptr1))
 		// Return { amt: 0, func: Function { name: "arch", kind: Freestanding, params: [], result: Some(String), docs: Docs { contents: None }, stability: Unknown } }
 	}).
 	Export("arch").
@@ -94,7 +136,7 @@ func NewExampleFactory(
 		// GetArg { nth: 0 }
 		// GetArg { nth: 1 }
 		// StringLift
-		buf0, ok0 := mod.Memory().Read(arg0, arg1)
+		buf0, ok0 := mod.Memory().Read(uint32(arg0), uint32(arg1))
 		if !ok0 {
 			panic(errors.New("failed to read bytes from memory"))
 		}
@@ -109,23 +151,14 @@ func NewExampleFactory(
 		return nil, err0
 	}
 
-	// Compiling the module takes a LONG time, so we want to do it once and hold
-	// onto it with the Runtime
-	module, err := wazeroRuntime.CompileModule(ctx, wasmFileExample)
-	if err != nil {
-		return nil, err
-	}
-	return &ExampleFactory{
-		runtime: wazeroRuntime,
-		module: module,
-	}, nil
+	return factory, nil
 }
 
 func (f *ExampleFactory) Instantiate(ctx context.Context) (*ExampleInstance, error) {
 	if module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig()); err != nil {
 		return nil, err
 	} else {
-		return &ExampleInstance{module}, nil
+		return &ExampleInstance{module, f.architecture}, nil
 	}
 }
 
@@ -135,6 +168,7 @@ func (f *ExampleFactory) Close(ctx context.Context) {
 
 type ExampleInstance struct {
 	module api.Module
+	architecture Architecture
 }
 
 func (i *ExampleInstance) Close(ctx context.Context) error {
@@ -183,17 +217,19 @@ func (i *ExampleInstance) Hello(
 	// deferring this, we ensure that no memory is corrupted before the function
 	// is done accessing it.
 	defer func() {
-		if _, err := i.module.ExportedFunction("cabi_post_hello").Call(ctx, raw0...); err != nil {
-			// If we get an error during cleanup, something really bad is
-			// going on, so we panic. Also, you can't return the error from
-			// the `defer`
-			panic(errors.New("failed to cleanup"))
+		if postFn := i.module.ExportedFunction("cabi_post_hello"); postFn != nil {
+			if _, err := postFn.Call(ctx, raw0...); err != nil {
+				// If we get an error during cleanup, something really bad is
+				// going on, so we panic. Also, you can't return the error from
+				// the `defer`
+				panic(errors.New("failed to cleanup"))
+			}
 		}
 	}()
 
 	results0 := raw0[0]
 	// I32Load8U { offset: 0 }
-	value1, ok1 := i.module.Memory().ReadByte(uint32(results0 + 0))
+	value1, ok1 := i.module.Memory().ReadByte(uint32(results0) + uint32(0))
 	if !ok1 {
 		var default1 string
 		return default1, errors.New("failed to read byte from memory")
@@ -204,19 +240,37 @@ func (i *ExampleInstance) Hello(
 	switch value1 {
 	case 0:
 		// PointerLoad { offset: ptrsz }
-		ptr2, ok2 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
+		var ptr2 uint64
+		var ok2 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			ptr2, ok2 = i.module.Memory().ReadUint64Le(uint32(results0) + uint32(i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpPtr2 uint32
+			tmpPtr2, ok2 = i.module.Memory().ReadUint32Le(uint32(results0) + uint32(i.architecture.PointerSize()))
+			ptr2 = uint64(tmpPtr2)
+		}
 		if !ok2 {
 			var default2 string
 			return default2, errors.New("failed to read pointer from memory")
 		}
 		// LengthLoad { offset: (2*ptrsz) }
-		len3, ok3 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
+		var len3 uint64
+		var ok3 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			len3, ok3 = i.module.Memory().ReadUint64Le(uint32(results0) + uint32(2*i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpLen3 uint32
+			tmpLen3, ok3 = i.module.Memory().ReadUint32Le(uint32(results0) + uint32(2*i.architecture.PointerSize()))
+			len3 = uint64(tmpLen3)
+		}
 		if !ok3 {
 			var default3 string
 			return default3, errors.New("failed to read length from memory")
 		}
 		// StringLift
-		buf4, ok4 := i.module.Memory().Read(ptr2, len3)
+		buf4, ok4 := i.module.Memory().Read(uint32(ptr2), uint32(len3))
 		if !ok4 {
 			var default4 string
 			return default4, errors.New("failed to read bytes from memory")
@@ -225,19 +279,37 @@ func (i *ExampleInstance) Hello(
 		value8 = str4
 	case 1:
 		// PointerLoad { offset: ptrsz }
-		ptr5, ok5 := i.module.Memory().ReadUint32Le(uint32(results0 + 4))
+		var ptr5 uint64
+		var ok5 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			ptr5, ok5 = i.module.Memory().ReadUint64Le(uint32(results0) + uint32(i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpPtr5 uint32
+			tmpPtr5, ok5 = i.module.Memory().ReadUint32Le(uint32(results0) + uint32(i.architecture.PointerSize()))
+			ptr5 = uint64(tmpPtr5)
+		}
 		if !ok5 {
 			var default5 string
 			return default5, errors.New("failed to read pointer from memory")
 		}
 		// LengthLoad { offset: (2*ptrsz) }
-		len6, ok6 := i.module.Memory().ReadUint32Le(uint32(results0 + 8))
+		var len6 uint64
+		var ok6 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			len6, ok6 = i.module.Memory().ReadUint64Le(uint32(results0) + uint32(2*i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpLen6 uint32
+			tmpLen6, ok6 = i.module.Memory().ReadUint32Le(uint32(results0) + uint32(2*i.architecture.PointerSize()))
+			len6 = uint64(tmpLen6)
+		}
 		if !ok6 {
 			var default6 string
 			return default6, errors.New("failed to read length from memory")
 		}
 		// StringLift
-		buf7, ok7 := i.module.Memory().Read(ptr5, len6)
+		buf7, ok7 := i.module.Memory().Read(uint32(ptr5), uint32(len6))
 		if !ok7 {
 			var default7 string
 			return default7, errors.New("failed to read bytes from memory")

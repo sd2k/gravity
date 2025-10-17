@@ -88,17 +88,59 @@ type Input struct {
 	Algorithm Algorithm
 }
 
+type Architecture uint
+const (
+	ArchitectureWasm32 Architecture = iota
+	ArchitectureWasm64
+)
+
+func (a Architecture) PointerSize() uint32 {
+	switch a {
+	case ArchitectureWasm32:
+		return 4
+	case ArchitectureWasm64:
+		return 8
+	default:
+		panic("invalid architecture")
+	}
+}
+
+type OutlierFactoryOptions func(*OutlierFactory)
+
+func OutlierFactoryWithArchitecture(architecture Architecture) OutlierFactoryOptions {
+	return func(factory *OutlierFactory) {
+		factory.architecture = architecture
+	}
+}
+
 type OutlierFactory struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
+	architecture Architecture
 }
 
 func NewOutlierFactory(
 	ctx context.Context,
 	types IOutlierTypes,
+	opts ...OutlierFactoryOptions,
 ) (*OutlierFactory, error) {
 	wazeroRuntime := wazero.NewRuntime(ctx)
+	// Compiling the module takes a LONG time, so we want to do it once and hold
+	// onto it with the Runtime
+	module, err := wazeroRuntime.CompileModule(ctx, wasmFileOutlier)
+	if err != nil {
+		return nil, err
+	}
+	factory := &OutlierFactory{
+		runtime: wazeroRuntime,
+		module: module,
+		// Initialize architecture to wasm32 by default
+		architecture: ArchitectureWasm32,
+	}
 
+	for _, opt := range opts {
+		opt(factory)
+	}
 	// Instantiate import host modules
 	_, err0 := wazeroRuntime.NewHostModuleBuilder("augurs:outlier/types").
 	Instantiate(ctx)
@@ -106,23 +148,14 @@ func NewOutlierFactory(
 		return nil, err0
 	}
 
-	// Compiling the module takes a LONG time, so we want to do it once and hold
-	// onto it with the Runtime
-	module, err := wazeroRuntime.CompileModule(ctx, wasmFileOutlier)
-	if err != nil {
-		return nil, err
-	}
-	return &OutlierFactory{
-		runtime: wazeroRuntime,
-		module: module,
-	}, nil
+	return factory, nil
 }
 
 func (f *OutlierFactory) Instantiate(ctx context.Context) (*OutlierInstance, error) {
 	if module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig()); err != nil {
 		return nil, err
 	} else {
-		return &OutlierInstance{module}, nil
+		return &OutlierInstance{module, f.architecture}, nil
 	}
 }
 
@@ -132,6 +165,7 @@ func (f *OutlierFactory) Close(ctx context.Context) {
 
 type OutlierInstance struct {
 	module api.Module
+	architecture Architecture
 }
 
 func (i *OutlierInstance) Close(ctx context.Context) error {
@@ -178,7 +212,7 @@ func (i *OutlierInstance) Detect(
 	// ListLower { element: Id(Id { idx: 3 }), realloc: Some("cabi_realloc") }
 	vec3 := data0
 	len3 := uint64(len(vec3))
-	result3, err3 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, 4, len3 * 8)
+	result3, err3 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, uint64(i.architecture.PointerSize()), len3 * uint64((2*i.architecture.PointerSize())))
 	if err3 != nil {
 		var default3 Output
 		return default3, err3
@@ -186,13 +220,13 @@ func (i *OutlierInstance) Detect(
 	ptr3 := result3[0]
 	for idx := uint64(0); idx < len3; idx++ {
 		e := vec3[idx]
-		base := uint32(ptr3 + uint64(idx) * uint64(8))
+		base := uint32(ptr3 + uint64(idx) * uint64((2*i.architecture.PointerSize())))
 		// IterElem { element: Id(Id { idx: 3 }) }
 		// IterBasePointer
 		// ListLower { element: F64, realloc: Some("cabi_realloc") }
 		vec2 := e
 		len2 := uint64(len(vec2))
-		result2, err2 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, 8, len2 * 8)
+		result2, err2 := i.module.ExportedFunction("cabi_realloc").Call(ctx, 0, 0, uint64(8), len2 * uint64(8))
 		if err2 != nil {
 			var default2 Output
 			return default2, err2
@@ -206,12 +240,12 @@ func (i *OutlierInstance) Detect(
 			// CoreF64FromF64
 			result1 := api.EncodeF64(float64(e))
 			// F64Store { offset: 0 }
-			i.module.Memory().WriteUint64Le(uint32(base+0), result1)
+			i.module.Memory().WriteUint64Le(uint32(base)+uint32(0), result1)
 		}
 		// LengthStore { offset: ptrsz }
-		i.module.Memory().WriteUint32Le(uint32(base+4), uint32(len2))
+		i.module.Memory().WriteUint32Le(uint32(base) + uint32(i.architecture.PointerSize()), uint32(len2))
 		// PointerStore { offset: 0 }
-		i.module.Memory().WriteUint32Le(uint32(base+0), uint32(ptr2))
+		i.module.Memory().WriteUint32Le(uint32(base)+uint32(0), uint32(ptr2))
 	}
 	// VariantLower { variant: Variant { cases: [Case { name: "dbscan", ty: Some(Id(Id { idx: 12 })), docs: Docs { contents: None } }, Case { name: "mad", ty: Some(Id(Id { idx: 14 })), docs: Docs { contents: None } }] }, name: "algorithm", ty: Id { idx: 15 }, results: [I32, I32, F64] }
 	var variant12_0 uint64
@@ -293,17 +327,19 @@ func (i *OutlierInstance) Detect(
 	// deferring this, we ensure that no memory is corrupted before the function
 	// is done accessing it.
 	defer func() {
-		if _, err := i.module.ExportedFunction("cabi_post_detect").Call(ctx, raw13...); err != nil {
-			// If we get an error during cleanup, something really bad is
-			// going on, so we panic. Also, you can't return the error from
-			// the `defer`
-			panic(errors.New("failed to cleanup"))
+		if postFn := i.module.ExportedFunction("cabi_post_detect"); postFn != nil {
+			if _, err := postFn.Call(ctx, raw13...); err != nil {
+				// If we get an error during cleanup, something really bad is
+				// going on, so we panic. Also, you can't return the error from
+				// the `defer`
+				panic(errors.New("failed to cleanup"))
+			}
 		}
 	}()
 
 	results13 := raw13[0]
 	// I32Load8U { offset: 0 }
-	value14, ok14 := i.module.Memory().ReadByte(uint32(results13 + 0))
+	value14, ok14 := i.module.Memory().ReadByte(uint32(results13) + uint32(0))
 	if !ok14 {
 		var default14 Output
 		return default14, errors.New("failed to read byte from memory")
@@ -314,13 +350,31 @@ func (i *OutlierInstance) Detect(
 	switch value14 {
 	case 0:
 		// PointerLoad { offset: ptrsz }
-		ptr15, ok15 := i.module.Memory().ReadUint32Le(uint32(results13 + 4))
+		var ptr15 uint64
+		var ok15 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			ptr15, ok15 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpPtr15 uint32
+			tmpPtr15, ok15 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(i.architecture.PointerSize()))
+			ptr15 = uint64(tmpPtr15)
+		}
 		if !ok15 {
 			var default15 Output
 			return default15, errors.New("failed to read pointer from memory")
 		}
 		// LengthLoad { offset: (2*ptrsz) }
-		len16, ok16 := i.module.Memory().ReadUint32Le(uint32(results13 + 8))
+		var len16 uint64
+		var ok16 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			len16, ok16 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(2*i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpLen16 uint32
+			tmpLen16, ok16 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(2*i.architecture.PointerSize()))
+			len16 = uint64(tmpLen16)
+		}
 		if !ok16 {
 			var default16 Output
 			return default16, errors.New("failed to read length from memory")
@@ -329,11 +383,11 @@ func (i *OutlierInstance) Detect(
 		base19 := ptr15
 		len19 := len16
 		result19 := make([]uint32, len19)
-		for idx19 := uint32(0); idx19 < len19; idx19++ {
-			base := base19 + idx19 * 4
+		for idx19 := uint64(0); idx19 < len19; idx19++ {
+			base := base19 + idx19 * uint64(4)
 			// IterBasePointer
 			// I32Load { offset: 0 }
-			value17, ok17 := i.module.Memory().ReadUint32Le(uint32(base + 0))
+			value17, ok17 := i.module.Memory().ReadUint32Le(uint32(base) + uint32(0))
 			if !ok17 {
 				var default17 Output
 				return default17, errors.New("failed to read i32 from memory")
@@ -343,13 +397,31 @@ func (i *OutlierInstance) Detect(
 			result19[idx19] = result18
 		}
 		// PointerLoad { offset: (3*ptrsz) }
-		ptr20, ok20 := i.module.Memory().ReadUint32Le(uint32(results13 + 12))
+		var ptr20 uint64
+		var ok20 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			ptr20, ok20 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32((3*i.architecture.PointerSize())))
+		case ArchitectureWasm32:
+			var tmpPtr20 uint32
+			tmpPtr20, ok20 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32((3*i.architecture.PointerSize())))
+			ptr20 = uint64(tmpPtr20)
+		}
 		if !ok20 {
 			var default20 Output
 			return default20, errors.New("failed to read pointer from memory")
 		}
 		// LengthLoad { offset: (4*ptrsz) }
-		len21, ok21 := i.module.Memory().ReadUint32Le(uint32(results13 + 16))
+		var len21 uint64
+		var ok21 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			len21, ok21 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(4*i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpLen21 uint32
+			tmpLen21, ok21 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(4*i.architecture.PointerSize()))
+			len21 = uint64(tmpLen21)
+		}
 		if !ok21 {
 			var default21 Output
 			return default21, errors.New("failed to read length from memory")
@@ -358,11 +430,11 @@ func (i *OutlierInstance) Detect(
 		base40 := ptr20
 		len40 := len21
 		result40 := make([]Series, len40)
-		for idx40 := uint32(0); idx40 < len40; idx40++ {
-			base := base40 + idx40 * 20
+		for idx40 := uint64(0); idx40 < len40; idx40++ {
+			base := base40 + idx40 * uint64((5*i.architecture.PointerSize()))
 			// IterBasePointer
 			// I32Load8U { offset: 0 }
-			value22, ok22 := i.module.Memory().ReadByte(uint32(base + 0))
+			value22, ok22 := i.module.Memory().ReadByte(uint32(base) + uint32(0))
 			if !ok22 {
 				var default22 Output
 				return default22, errors.New("failed to read byte from memory")
@@ -370,13 +442,31 @@ func (i *OutlierInstance) Detect(
 			// BoolFromI32
 			value23 := value22 != 0
 			// PointerLoad { offset: ptrsz }
-			ptr24, ok24 := i.module.Memory().ReadUint32Le(uint32(base + 4))
+			var ptr24 uint64
+			var ok24 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				ptr24, ok24 = i.module.Memory().ReadUint64Le(uint32(base) + uint32(i.architecture.PointerSize()))
+			case ArchitectureWasm32:
+				var tmpPtr24 uint32
+				tmpPtr24, ok24 = i.module.Memory().ReadUint32Le(uint32(base) + uint32(i.architecture.PointerSize()))
+				ptr24 = uint64(tmpPtr24)
+			}
 			if !ok24 {
 				var default24 Output
 				return default24, errors.New("failed to read pointer from memory")
 			}
 			// LengthLoad { offset: (2*ptrsz) }
-			len25, ok25 := i.module.Memory().ReadUint32Le(uint32(base + 8))
+			var len25 uint64
+			var ok25 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				len25, ok25 = i.module.Memory().ReadUint64Le(uint32(base) + uint32(2*i.architecture.PointerSize()))
+			case ArchitectureWasm32:
+				var tmpLen25 uint32
+				tmpLen25, ok25 = i.module.Memory().ReadUint32Le(uint32(base) + uint32(2*i.architecture.PointerSize()))
+				len25 = uint64(tmpLen25)
+			}
 			if !ok25 {
 				var default25 Output
 				return default25, errors.New("failed to read length from memory")
@@ -385,11 +475,11 @@ func (i *OutlierInstance) Detect(
 			base33 := ptr24
 			len33 := len25
 			result33 := make([]OutlierInterval, len33)
-			for idx33 := uint32(0); idx33 < len33; idx33++ {
-				base := base33 + idx33 * 12
+			for idx33 := uint64(0); idx33 < len33; idx33++ {
+				base := base33 + idx33 * uint64(12)
 				// IterBasePointer
 				// I32Load { offset: 0 }
-				value26, ok26 := i.module.Memory().ReadUint32Le(uint32(base + 0))
+				value26, ok26 := i.module.Memory().ReadUint32Le(uint32(base) + uint32(0))
 				if !ok26 {
 					var default26 Output
 					return default26, errors.New("failed to read i32 from memory")
@@ -397,7 +487,7 @@ func (i *OutlierInstance) Detect(
 				// U32FromI32
 				result27 := api.DecodeU32(uint64(value26))
 				// I32Load8U { offset: 4 }
-				value28, ok28 := i.module.Memory().ReadByte(uint32(base + 4))
+				value28, ok28 := i.module.Memory().ReadByte(uint32(base) + uint32(4))
 				if !ok28 {
 					var default28 Output
 					return default28, errors.New("failed to read byte from memory")
@@ -409,7 +499,7 @@ func (i *OutlierInstance) Detect(
 					ok31 = false
 				} else {
 					// I32Load { offset: 8 }
-					value29, ok29 := i.module.Memory().ReadUint32Le(uint32(base + 8))
+					value29, ok29 := i.module.Memory().ReadUint32Le(uint32(base) + uint32(8))
 					if !ok29 {
 						var default29 Output
 						return default29, errors.New("failed to read i32 from memory")
@@ -433,13 +523,31 @@ func (i *OutlierInstance) Detect(
 				result33[idx33] = value32
 			}
 			// PointerLoad { offset: (3*ptrsz) }
-			ptr34, ok34 := i.module.Memory().ReadUint32Le(uint32(base + 12))
+			var ptr34 uint64
+			var ok34 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				ptr34, ok34 = i.module.Memory().ReadUint64Le(uint32(base) + uint32((3*i.architecture.PointerSize())))
+			case ArchitectureWasm32:
+				var tmpPtr34 uint32
+				tmpPtr34, ok34 = i.module.Memory().ReadUint32Le(uint32(base) + uint32((3*i.architecture.PointerSize())))
+				ptr34 = uint64(tmpPtr34)
+			}
 			if !ok34 {
 				var default34 Output
 				return default34, errors.New("failed to read pointer from memory")
 			}
 			// LengthLoad { offset: (4*ptrsz) }
-			len35, ok35 := i.module.Memory().ReadUint32Le(uint32(base + 16))
+			var len35 uint64
+			var ok35 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				len35, ok35 = i.module.Memory().ReadUint64Le(uint32(base) + uint32(4*i.architecture.PointerSize()))
+			case ArchitectureWasm32:
+				var tmpLen35 uint32
+				tmpLen35, ok35 = i.module.Memory().ReadUint32Le(uint32(base) + uint32(4*i.architecture.PointerSize()))
+				len35 = uint64(tmpLen35)
+			}
 			if !ok35 {
 				var default35 Output
 				return default35, errors.New("failed to read length from memory")
@@ -448,11 +556,11 @@ func (i *OutlierInstance) Detect(
 			base38 := ptr34
 			len38 := len35
 			result38 := make([]float64, len38)
-			for idx38 := uint32(0); idx38 < len38; idx38++ {
-				base := base38 + idx38 * 8
+			for idx38 := uint64(0); idx38 < len38; idx38++ {
+				base := base38 + idx38 * uint64(8)
 				// IterBasePointer
 				// F64Load { offset: 0 }
-				value36, ok36 := i.module.Memory().ReadUint64Le(uint32(base + 0))
+				value36, ok36 := i.module.Memory().ReadUint64Le(uint32(base) + uint32(0))
 				if !ok36 {
 					var default36 Output
 					return default36, errors.New("failed to read f64 from memory")
@@ -470,7 +578,7 @@ func (i *OutlierInstance) Detect(
 			result40[idx40] = value39
 		}
 		// I32Load8U { offset: (5*ptrsz) }
-		value41, ok41 := i.module.Memory().ReadByte(uint32(results13 + 20))
+		value41, ok41 := i.module.Memory().ReadByte(uint32(results13) + uint32((5*i.architecture.PointerSize())))
 		if !ok41 {
 			var default41 Output
 			return default41, errors.New("failed to read byte from memory")
@@ -482,13 +590,31 @@ func (i *OutlierInstance) Detect(
 			ok53 = false
 		} else {
 			// PointerLoad { offset: (6*ptrsz) }
-			ptr42, ok42 := i.module.Memory().ReadUint32Le(uint32(results13 + 24))
+			var ptr42 uint64
+			var ok42 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				ptr42, ok42 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32((6*i.architecture.PointerSize())))
+			case ArchitectureWasm32:
+				var tmpPtr42 uint32
+				tmpPtr42, ok42 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32((6*i.architecture.PointerSize())))
+				ptr42 = uint64(tmpPtr42)
+			}
 			if !ok42 {
 				var default42 Output
 				return default42, errors.New("failed to read pointer from memory")
 			}
 			// LengthLoad { offset: (7*ptrsz) }
-			len43, ok43 := i.module.Memory().ReadUint32Le(uint32(results13 + 28))
+			var len43 uint64
+			var ok43 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				len43, ok43 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(7*i.architecture.PointerSize()))
+			case ArchitectureWasm32:
+				var tmpLen43 uint32
+				tmpLen43, ok43 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(7*i.architecture.PointerSize()))
+				len43 = uint64(tmpLen43)
+			}
 			if !ok43 {
 				var default43 Output
 				return default43, errors.New("failed to read length from memory")
@@ -497,11 +623,11 @@ func (i *OutlierInstance) Detect(
 			base46 := ptr42
 			len46 := len43
 			result46 := make([]float64, len46)
-			for idx46 := uint32(0); idx46 < len46; idx46++ {
-				base := base46 + idx46 * 8
+			for idx46 := uint64(0); idx46 < len46; idx46++ {
+				base := base46 + idx46 * uint64(8)
 				// IterBasePointer
 				// F64Load { offset: 0 }
-				value44, ok44 := i.module.Memory().ReadUint64Le(uint32(base + 0))
+				value44, ok44 := i.module.Memory().ReadUint64Le(uint32(base) + uint32(0))
 				if !ok44 {
 					var default44 Output
 					return default44, errors.New("failed to read f64 from memory")
@@ -511,13 +637,31 @@ func (i *OutlierInstance) Detect(
 				result46[idx46] = result45
 			}
 			// PointerLoad { offset: (8*ptrsz) }
-			ptr47, ok47 := i.module.Memory().ReadUint32Le(uint32(results13 + 32))
+			var ptr47 uint64
+			var ok47 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				ptr47, ok47 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32((8*i.architecture.PointerSize())))
+			case ArchitectureWasm32:
+				var tmpPtr47 uint32
+				tmpPtr47, ok47 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32((8*i.architecture.PointerSize())))
+				ptr47 = uint64(tmpPtr47)
+			}
 			if !ok47 {
 				var default47 Output
 				return default47, errors.New("failed to read pointer from memory")
 			}
 			// LengthLoad { offset: (9*ptrsz) }
-			len48, ok48 := i.module.Memory().ReadUint32Le(uint32(results13 + 36))
+			var len48 uint64
+			var ok48 bool
+			switch i.architecture {
+			case ArchitectureWasm64:
+				len48, ok48 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(9*i.architecture.PointerSize()))
+			case ArchitectureWasm32:
+				var tmpLen48 uint32
+				tmpLen48, ok48 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(9*i.architecture.PointerSize()))
+				len48 = uint64(tmpLen48)
+			}
 			if !ok48 {
 				var default48 Output
 				return default48, errors.New("failed to read length from memory")
@@ -526,11 +670,11 @@ func (i *OutlierInstance) Detect(
 			base51 := ptr47
 			len51 := len48
 			result51 := make([]float64, len51)
-			for idx51 := uint32(0); idx51 < len51; idx51++ {
-				base := base51 + idx51 * 8
+			for idx51 := uint64(0); idx51 < len51; idx51++ {
+				base := base51 + idx51 * uint64(8)
 				// IterBasePointer
 				// F64Load { offset: 0 }
-				value49, ok49 := i.module.Memory().ReadUint64Le(uint32(base + 0))
+				value49, ok49 := i.module.Memory().ReadUint64Le(uint32(base) + uint32(0))
 				if !ok49 {
 					var default49 Output
 					return default49, errors.New("failed to read f64 from memory")
@@ -562,19 +706,37 @@ func (i *OutlierInstance) Detect(
 		value58 = value54
 	case 1:
 		// PointerLoad { offset: ptrsz }
-		ptr55, ok55 := i.module.Memory().ReadUint32Le(uint32(results13 + 4))
+		var ptr55 uint64
+		var ok55 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			ptr55, ok55 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpPtr55 uint32
+			tmpPtr55, ok55 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(i.architecture.PointerSize()))
+			ptr55 = uint64(tmpPtr55)
+		}
 		if !ok55 {
 			var default55 Output
 			return default55, errors.New("failed to read pointer from memory")
 		}
 		// LengthLoad { offset: (2*ptrsz) }
-		len56, ok56 := i.module.Memory().ReadUint32Le(uint32(results13 + 8))
+		var len56 uint64
+		var ok56 bool
+		switch i.architecture {
+		case ArchitectureWasm64:
+			len56, ok56 = i.module.Memory().ReadUint64Le(uint32(results13) + uint32(2*i.architecture.PointerSize()))
+		case ArchitectureWasm32:
+			var tmpLen56 uint32
+			tmpLen56, ok56 = i.module.Memory().ReadUint32Le(uint32(results13) + uint32(2*i.architecture.PointerSize()))
+			len56 = uint64(tmpLen56)
+		}
 		if !ok56 {
 			var default56 Output
 			return default56, errors.New("failed to read length from memory")
 		}
 		// StringLift
-		buf57, ok57 := i.module.Memory().Read(ptr55, len56)
+		buf57, ok57 := i.module.Memory().Read(uint32(ptr55), uint32(len56))
 		if !ok57 {
 			var default57 Output
 			return default57, errors.New("failed to read bytes from memory")
