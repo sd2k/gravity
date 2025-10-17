@@ -5,11 +5,13 @@ use genco::prelude::*;
 use crate::{
     codegen::ir::AnalyzedImports,
     go::{
-        GoIdentifier, comment,
+        comment,
         imports::{
-            CONTEXT_CONTEXT, ERRORS_NEW, SYNC_MUTEX, WAZERO_API_MEMORY, WAZERO_API_MODULE,
-            WAZERO_COMPILED_MODULE, WAZERO_NEW_MODULE_CONFIG, WAZERO_NEW_RUNTIME, WAZERO_RUNTIME,
+            CONTEXT_CONTEXT, ERRORS_NEW, SYNC_MUTEX, WASI_SNAPSHOT_PREVIEW1_MUST_INSTANTIATE,
+            WAZERO_API_MEMORY, WAZERO_API_MODULE, WAZERO_COMPILED_MODULE, WAZERO_MODULE_CONFIG,
+            WAZERO_NEW_MODULE_CONFIG, WAZERO_NEW_RUNTIME, WAZERO_RUNTIME,
         },
+        GoIdentifier,
     },
 };
 
@@ -148,10 +150,31 @@ impl<'a> FactoryGenerator<'a> {
                     }
                 }
                 $['\n']
+                func $(factory_name)WithWasmBytes[$(generics_with_constraints)](wasmBytes []byte) $options_name[$generics] {
+                    return func(factory *$factory_name_with_generics) {
+                        factory.wasmBytes = wasmBytes
+                    }
+                }
+                $['\n']
+                func $(factory_name)WithModuleConfig[$(generics_with_constraints)](config $WAZERO_MODULE_CONFIG) $options_name[$generics] {
+                    return func(factory *$factory_name_with_generics) {
+                        factory.moduleConfig = config
+                    }
+                }
+                $['\n']
+                func $(factory_name)WithWASI[$(generics_with_constraints)]() $options_name[$generics] {
+                    return func(factory *$factory_name_with_generics) {
+                        factory.enableWASI = true
+                    }
+                }
+                $['\n']
                 type $factory_name[$(for (value_param, pointer_param, pointer_iface) in &type_param_data join (, ) => $value_param any, $pointer_param $pointer_iface[$value_param])] struct {
                     runtime $WAZERO_RUNTIME
                     module  $WAZERO_COMPILED_MODULE
                     architecture Architecture
+                    wasmBytes []byte
+                    moduleConfig $WAZERO_MODULE_CONFIG
+                    enableWASI bool
                     $['\r']
                     $(for (_iface_name, _resource_name, prefixed_name, type_param_name) in resource_info.iter() join ($['\r']) =>
                     $(&GoIdentifier::public(format!("{}-resource-table", prefixed_name))) *$(&GoIdentifier::private(format!("{}-resource-table", prefixed_name)))[$(&GoIdentifier::public(format!("t-{}-value", prefixed_name))), $(&GoIdentifier::public(format!("p-{}", String::from(type_param_name))))])
@@ -165,28 +188,12 @@ impl<'a> FactoryGenerator<'a> {
                     opts ...$options_name[$generics],
                 ) (*$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)], error) {
                     $['\r']
-                    wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
-
-                    $['\r']
                     $(comment(&["Initialize resource tables before host module instantiation"]))
                     $(for (_iface_name, _resource_name, prefixed_name, type_param_name) in resource_info.iter() join ($['\r']) =>
                     $(&GoIdentifier::private(format!("{}_resource_table", prefixed_name))) := new$(&GoIdentifier::public(format!("{}-resource-table", prefixed_name)))[$(&GoIdentifier::public(format!("t-{}-value", prefixed_name))), $(&GoIdentifier::public(format!("p-{}", String::from(type_param_name))))]())
                     $['\r']
 
-                    $['\r']
-                    $(comment(&[
-                    "Compiling the module takes a LONG time, so we want to do it once and hold",
-                        "onto it with the Runtime",
-                    ]))
-                    module, err := wazeroRuntime.CompileModule(ctx, $wasm_var_name)
-                    if err != nil {
-                        return nil, err
-                    }
-                    $['\r']
-
                     factory := &$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)]{
-                        runtime: wazeroRuntime,
-                        module:  module,
                         $(comment(["Initialize architecture to wasm32 by default"]))
                         architecture: ArchitectureWasm32,
                         $['\r']
@@ -194,8 +201,17 @@ impl<'a> FactoryGenerator<'a> {
                         $(&GoIdentifier::public(format!("{}-resource-table", prefixed_name))): $(&GoIdentifier::private(format!("{}_resource_table", prefixed_name))),$['\r'])
                     }
                     $['\r']
+                    $(comment(&["Apply options before instantiation"]))
                     for _, opt := range opts {
                         opt(factory)
+                    }
+                    $['\r']
+                    wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
+                    factory.runtime = wazeroRuntime
+                    $['\r']
+                    $(comment(&["Instantiate WASI if enabled"]))
+                    if factory.enableWASI {
+                        $WASI_SNAPSHOT_PREVIEW1_MUST_INSTANTIATE(ctx, wazeroRuntime)
                     }
                     $['\r']
                     $(comment(&["Instantiate import host modules"]))
@@ -209,11 +225,31 @@ impl<'a> FactoryGenerator<'a> {
                     $chain
                     $['\r']
                 )
+                    $['\r']
+                    $(comment(&[
+                    "Compiling the module takes a LONG time, so we want to do it once and hold",
+                        "onto it with the Runtime",
+                    ]))
+                    wasmBytes := $wasm_var_name
+                    if factory.wasmBytes != nil {
+                        wasmBytes = factory.wasmBytes
+                    }
+                    module, err := wazeroRuntime.CompileModule(ctx, wasmBytes)
+                    if err != nil {
+                        wazeroRuntime.Close(ctx)
+                        return nil, err
+                    }
+                    factory.module = module
+                    $['\r']
                     return factory, nil
                 }
             $['\n']
             func (f *$factory_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)]) Instantiate(ctx $CONTEXT_CONTEXT) (*$instance_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)], error) {
-                if module, err := f.runtime.InstantiateModule(ctx, f.module, $WAZERO_NEW_MODULE_CONFIG()); err != nil {
+                config := f.moduleConfig
+                if f.moduleConfig == nil {
+                    config = $WAZERO_NEW_MODULE_CONFIG()
+                }
+                if module, err := f.runtime.InstantiateModule(ctx, f.module, config); err != nil {
                     return nil, err
                 } else {
                     return &$instance_name[$(for (value_param, pointer_param, _) in &type_param_data join (, ) => $value_param, $pointer_param)]{
@@ -242,10 +278,31 @@ impl<'a> FactoryGenerator<'a> {
                     }
                 }
                 $['\n']
+                func $(factory_name)WithWasmBytes(wasmBytes []byte) $(factory_name)Options {
+                    return func(factory *$factory_name) {
+                        factory.wasmBytes = wasmBytes
+                    }
+                }
+                $['\n']
+                func $(factory_name)WithModuleConfig(config $WAZERO_MODULE_CONFIG) $(factory_name)Options {
+                    return func(factory *$factory_name) {
+                        factory.moduleConfig = config
+                    }
+                }
+                $['\n']
+                func $(factory_name)WithWASI() $(factory_name)Options {
+                    return func(factory *$factory_name) {
+                        factory.enableWASI = true
+                    }
+                }
+                $['\n']
                 type $factory_name struct {
                     runtime $WAZERO_RUNTIME
                     module  $WAZERO_COMPILED_MODULE
                     architecture Architecture
+                    wasmBytes []byte
+                    moduleConfig $WAZERO_MODULE_CONFIG
+                    enableWASI bool
                 }
                 $['\n']
                 func $constructor_name(
@@ -254,39 +311,54 @@ impl<'a> FactoryGenerator<'a> {
                     $(&interface.constructor_param_name) $(&interface.go_interface_name),)
                     opts ...$(factory_name)Options,
                 ) (*$factory_name, error) {
-                    wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
-                    $['\r']
-                    $(comment(&[
-                        "Compiling the module takes a LONG time, so we want to do it once and hold",
-                            "onto it with the Runtime",
-                    ]))
-                    module, err := wazeroRuntime.CompileModule(ctx, $wasm_var_name)
-                    if err != nil {
-                        return nil, err
-                    }
                     factory := &$factory_name{
-                        runtime: wazeroRuntime,
-                        module:  module,
                         $(comment(["Initialize architecture to wasm32 by default"]))
                         architecture: ArchitectureWasm32,
                     }
-
                     $['\r']
+                    $(comment(&["Apply options before instantiation"]))
                     for _, opt := range opts {
                         opt(factory)
                     }
                     $['\r']
+                    wazeroRuntime := $WAZERO_NEW_RUNTIME(ctx)
+                    factory.runtime = wazeroRuntime
+                    $['\r']
+                    $(comment(&["Instantiate WASI if enabled"]))
+                    if factory.enableWASI {
+                        $WASI_SNAPSHOT_PREVIEW1_MUST_INSTANTIATE(ctx, wazeroRuntime)
+                    }
+                    $['\r']
                     $(comment(&["Instantiate import host modules"]))
                     $(for chain in self.config.import_chains.values() =>
-                        $chain
-                        $['\r']
+                    $chain
+                    $['\r']
                     )
-
+                    $['\r']
+                    $(comment(&[
+                        "Compiling the module takes a LONG time, so we want to do it once and hold",
+                        "onto it with the Runtime",
+                    ]))
+                    wasmBytes := $wasm_var_name
+                    if factory.wasmBytes != nil {
+                        wasmBytes = factory.wasmBytes
+                    }
+                    module, err := wazeroRuntime.CompileModule(ctx, wasmBytes)
+                    if err != nil {
+                        wazeroRuntime.Close(ctx)
+                        return nil, err
+                    }
+                    factory.module = module
+                    $['\r']
                     return factory, nil
                 }
                 $['\n']
                 func (f *$factory_name) Instantiate(ctx $CONTEXT_CONTEXT) (*$instance_name, error) {
-                    if module, err := f.runtime.InstantiateModule(ctx, f.module, $WAZERO_NEW_MODULE_CONFIG()); err != nil {
+                    config := f.moduleConfig
+                    if f.moduleConfig == nil {
+                        config = $WAZERO_NEW_MODULE_CONFIG()
+                    }
+                    if module, err := f.runtime.InstantiateModule(ctx, f.module, config); err != nil {
                         return nil, err
                     } else {
                         return &$instance_name{module, f.architecture}, nil
@@ -618,7 +690,7 @@ mod tests {
     use genco::lang::go::Tokens;
 
     use crate::{
-        codegen::{FactoryGenerator, factory::FactoryConfig, ir::AnalyzedImports},
+        codegen::{factory::FactoryConfig, ir::AnalyzedImports, FactoryGenerator},
         go::GoIdentifier,
     };
 

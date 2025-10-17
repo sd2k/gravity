@@ -1,0 +1,30 @@
+/// A basic example world.
+package arcjet:basic;
+
+/// A logger interface.
+interface logger {
+  /// Emit a log message at the debug level.
+  debug: func(msg: string);
+  /// Emit a log message at the info level.
+  info: func(msg: string);
+  /// Emit a log message at the warn level.
+  warn: func(msg: string);
+  /// Emit a log message at the error level.
+  error: func(msg: string);
+}
+
+/// A basic component model world.
+world basic {
+  import logger;
+
+  /// Say hello.
+  export hello: func() -> result<string, string>;
+  /// Just return a bool primitive.
+  export primitive: func() -> bool;
+  /// Return an optional bool primitive.
+  export optional-primitive: func(b: option<bool>) -> option<bool>;
+  /// Return a result with an error.
+  export result-primitive: func() -> result<bool, string>;
+  /// Return an optional string.
+  export optional-string: func(s: option<string>) -> option<string>;
+}

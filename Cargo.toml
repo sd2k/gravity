@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["cmd/*", "examples/*"]
+exclude = ["examples/go"]
 
 [patch.crates-io]
 # # meanwhile, had to fork to add a feature flag for timers

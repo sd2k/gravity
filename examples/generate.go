@@ -8,6 +8,7 @@ package examples
 //go:generate cargo build -p example-resources --target wasm32-unknown-unknown --release
 //go:generate cargo build -p example-resources-simple --target wasm32-unknown-unknown --release
 //go:generate cargo build -p example-tuples --target wasm32-unknown-unknown --release
+//go:generate sh -c "cd go/guest && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -ldflags=-checklinkname=0 -o go-guest.wasm main.go"
 
 //go:generate cargo run --bin gravity -- --world basic --output ./basic/basic.go --wit-file ./basic/wit/basic.wit ../target/wasm32-unknown-unknown/release/example_basic.wasm
 //go:generate cargo run --bin gravity -- --world example --output ./iface-method-returns-string/example.go --wit-file ./iface-method-returns-string/wit/example.wit ../target/wasm32-unknown-unknown/release/example_iface_method_returns_string.wasm
@@ -16,3 +17,4 @@ package examples
 //go:generate cargo run --bin gravity -- --world resources --output ./resources/resources.go --wit-file ./resources/wit/resources.wit ../target/wasm32-unknown-unknown/release/example_resources.wasm
 //go:generate cargo run --bin gravity -- --world resources --output ./resources-simple/resources.go --wit-file ./resources-simple/wit/world.wit ../target/wasm32-unknown-unknown/release/example_resources_simple.wasm
 //go:generate cargo run --bin gravity -- --world tuples --output ./tuples/tuples.go --wit-file ./tuples/wit/tuple.wit ../target/wasm32-unknown-unknown/release/example_tuples.wasm
+//go:generate cargo run --bin gravity -- --world basic --output ./go/basic.go --wit-file ./go/wit/basic.wit ./go/guest/go-guest.wasm

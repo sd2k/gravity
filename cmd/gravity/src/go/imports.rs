@@ -38,3 +38,11 @@ pub static WAZERO_API_DECODE_F64: GoImport =
     GoImport("github.com/tetratelabs/wazero/api", "DecodeF64");
 pub static REFLECT_VALUE_OF: GoImport = GoImport("reflect", "ValueOf");
 pub static SYNC_MUTEX: GoImport = GoImport("sync", "Mutex");
+pub static OS_STDOUT: GoImport = GoImport("os", "Stdout");
+pub static OS_STDERR: GoImport = GoImport("os", "Stderr");
+pub static WAZERO_MODULE_CONFIG: GoImport =
+    GoImport("github.com/tetratelabs/wazero", "ModuleConfig");
+pub static WASI_SNAPSHOT_PREVIEW1_MUST_INSTANTIATE: GoImport = GoImport(
+    "github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1",
+    "MustInstantiate",
+);

@@ -6,6 +6,7 @@ import "context"
 import "errors"
 import "github.com/tetratelabs/wazero"
 import "github.com/tetratelabs/wazero/api"
+import "github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 import "sync"
 
 import _ "embed"
@@ -113,10 +114,31 @@ func ResourcesFactoryWithArchitecture[TIfaceFooerValue any, PTIfaceFooer PIfaceF
 	}
 }
 
+func ResourcesFactoryWithWasmBytes[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]](wasmBytes []byte) ResourcesFactoryOptions[TIfaceFooerValue, PTIfaceFooer] {
+	return func(factory *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) {
+		factory.wasmBytes = wasmBytes
+	}
+}
+
+func ResourcesFactoryWithModuleConfig[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]](config wazero.ModuleConfig) ResourcesFactoryOptions[TIfaceFooerValue, PTIfaceFooer] {
+	return func(factory *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) {
+		factory.moduleConfig = config
+	}
+}
+
+func ResourcesFactoryWithWASI[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]]() ResourcesFactoryOptions[TIfaceFooerValue, PTIfaceFooer] {
+	return func(factory *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) {
+		factory.enableWASI = true
+	}
+}
+
 type ResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFooerValue]] struct {
 	runtime wazero.Runtime
 	module wazero.CompiledModule
 	architecture Architecture
+	wasmBytes []byte
+	moduleConfig wazero.ModuleConfig
+	enableWASI bool
 	IfaceFooerResourceTable *ifaceFooerResourceTable[TIfaceFooerValue, PTIfaceFooer]
 }
 
@@ -125,27 +147,23 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 	iface IResourcesIface[TIfaceFooerValue, PTIfaceFooer],
 	opts ...ResourcesFactoryOptions[TIfaceFooerValue, PTIfaceFooer],
 ) (*ResourcesFactory[TIfaceFooerValue, PTIfaceFooer], error) {
-	wazeroRuntime := wazero.NewRuntime(ctx)
-
 	// Initialize resource tables before host module instantiation
 	ifaceFooerResourceTable := newIfaceFooerResourceTable[TIfaceFooerValue, PTIfaceFooer]()
 
-	// Compiling the module takes a LONG time, so we want to do it once and hold
-	// onto it with the Runtime
-	module, err := wazeroRuntime.CompileModule(ctx, wasmFileResources)
-	if err != nil {
-		return nil, err
-	}
-
 	factory := &ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]{
-		runtime: wazeroRuntime,
-		module: module,
 		// Initialize architecture to wasm32 by default
 		architecture: ArchitectureWasm32,
 		IfaceFooerResourceTable: ifaceFooerResourceTable,
 	}
+	// Apply options before instantiation
 	for _, opt := range opts {
 		opt(factory)
+	}
+	wazeroRuntime := wazero.NewRuntime(ctx)
+	factory.runtime = wazeroRuntime
+	// Instantiate WASI if enabled
+	if factory.enableWASI {
+		wasi_snapshot_preview1.MustInstantiate(ctx, wazeroRuntime)
 	}
 	// Instantiate import host modules
 	_, err0 := wazeroRuntime.NewHostModuleBuilder("arcjet:resources/iface").
@@ -296,11 +314,27 @@ func NewResourcesFactory[TIfaceFooerValue any, PTIfaceFooer PIfaceFooer[TIfaceFo
 		return nil, err0
 	}
 	// Instantiate export resource management host modules
+	// Compiling the module takes a LONG time, so we want to do it once and hold
+	// onto it with the Runtime
+	wasmBytes := wasmFileResources
+	if factory.wasmBytes != nil {
+		wasmBytes = factory.wasmBytes
+	}
+	module, err := wazeroRuntime.CompileModule(ctx, wasmBytes)
+	if err != nil {
+		wazeroRuntime.Close(ctx)
+		return nil, err
+	}
+	factory.module = module
 	return factory, nil
 }
 
 func (f *ResourcesFactory[TIfaceFooerValue, PTIfaceFooer]) Instantiate(ctx context.Context) (*ResourcesInstance[TIfaceFooerValue, PTIfaceFooer], error) {
-	if module, err := f.runtime.InstantiateModule(ctx, f.module, wazero.NewModuleConfig()); err != nil {
+	config := f.moduleConfig
+	if f.moduleConfig == nil {
+		config = wazero.NewModuleConfig()
+	}
+	if module, err := f.runtime.InstantiateModule(ctx, f.module, config); err != nil {
 		return nil, err
 	} else {
 		return &ResourcesInstance[TIfaceFooerValue, PTIfaceFooer]{
